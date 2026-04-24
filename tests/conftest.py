@@ -10,12 +10,12 @@ def tiny_seg():
     from brainmesh import Label
 
     N = 20
-    data = np.ones((N, N, N), dtype=np.uint8)
+    data = np.zeros((N, N, N), dtype=np.uint8)  # background outside
     grid = pv.ImageData(dimensions=(N + 1, N + 1, N + 1), spacing=(1.0 / N,) * 3)
     pts = grid.cell_centers().points.reshape(N, N, N, 3)
     dist = np.linalg.norm(pts - 0.5, axis=-1)
-    data[dist < 0.4] = Label.CSF
-    data[dist < 0.25] = Label.LEFT_CEREBRAL_WHITE_MATTER
+    data[dist < 0.45] = Label.CSF
+    data[dist < 0.3] = Label.LEFT_CEREBRAL_WHITE_MATTER
     return data
 
 
