@@ -1,7 +1,6 @@
 import numpy as np
 from collections import namedtuple
 
-# 1. Define labels and values
 _labels_dict = {
     'LEFT_CEREBRAL_WHITE_MATTER': np.uint8(2),
     'LEFT_CEREBRAL_CORTEX': np.uint8(3),
@@ -21,7 +20,7 @@ _labels_dict = {
     'CSF': np.uint8(24),
     'LEFT_ACCUMBENS_AREA': np.uint8(26),
     'LEFT_VENTRAL_DC': np.uint8(28),
-    'LEFT_CHOROID_PLEXUS':np.uint8(31),
+    'LEFT_CHOROID_PLEXUS': np.uint8(31),
     'RIGHT_CEREBRAL_WHITE_MATTER': np.uint8(41),
     'RIGHT_CEREBRAL_CORTEX': np.uint8(42),
     'RIGHT_LATERAL_VENTRICLE': np.uint8(43),
@@ -36,22 +35,22 @@ _labels_dict = {
     'RIGHT_AMYGDALA': np.uint8(54),
     'RIGHT_ACCUMBENS_AREA': np.uint8(58),
     'RIGHT_VENTRAL_DC': np.uint8(60),
-    'RIGHT_CHOROID_PLEXUS':np.uint8(63),
-    'FALX':np.uint(70),
-    'TENTORIUM':np.uint(71),
-    'TENTORIUM':np.uint(71),
-    "WM_HYPOINTENSITIES": np.uint8(77),
+    'RIGHT_CHOROID_PLEXUS': np.uint8(63),
+    'FALX': np.uint8(70),
+    'TENTORIUM': np.uint8(71),
+    'WM_HYPOINTENSITIES': np.uint8(77),
 }
 
 BrainLabels = namedtuple('BrainLabels', _labels_dict.keys())
 Label = BrainLabels(**_labels_dict)
 
-VENTRICLE_LABELS = [Label.LEFT_LATERAL_VENTRICLE,
-                    Label.LEFT_INFERIOR_LATERAL_VENTRICLE,
-                    Label.RIGHT_LATERAL_VENTRICLE,
-                    Label.RIGHT_INFERIOR_LATERAL_VENTRICLE,
-                    Label.THIRD_VENTRICLE,
-                    Label.FOURTH_VENTRICLE,
-                    Label.RIGHT_CHOROID_PLEXUS,
-                    Label.LEFT_CHOROID_PLEXUS
-                    ]
+VENTRICLE_LABELS = [
+    Label.LEFT_LATERAL_VENTRICLE,
+    Label.LEFT_INFERIOR_LATERAL_VENTRICLE,
+    Label.RIGHT_LATERAL_VENTRICLE,
+    Label.RIGHT_INFERIOR_LATERAL_VENTRICLE,
+    Label.THIRD_VENTRICLE,
+    Label.FOURTH_VENTRICLE,
+    Label.RIGHT_CHOROID_PLEXUS,
+    Label.LEFT_CHOROID_PLEXUS,
+]
