@@ -26,7 +26,14 @@ from .anatomy import (
     extend_brainstem_caudally,
 )
 from .surface import transfer_labels, coarsen_surface, straighten_spinal_interface
-from .mesh import mark_mesh
+from .mesh import (
+    mark_mesh,
+    load_marked_mesh,
+    filter_by_label,
+    extract_csf,
+    mark_interface_facets,
+    mark_boundary_facets,
+)
 
 __all__ = [
     "Label",
@@ -56,4 +63,9 @@ __all__ = [
     "coarsen_surface",
     "straighten_spinal_interface",
     "mark_mesh",
+    "load_marked_mesh",
+    "filter_by_label",
+    "extract_csf",
+    "mark_interface_facets",
+    "mark_boundary_facets",
 ]
