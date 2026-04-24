@@ -1,8 +1,4 @@
-"""Convenience script — wraps the segmentation-to-surface pipeline CLI."""
-from brainmesh.pipeline import segmentation_to_surface
+from brainmesh.cli import surface_main
 
-segmentation_to_surface(
-    seg_path="testdata/sub1_gouhfi_hybrid_seg.nii.gz",
-    out_dir="results",
-    numba_threads=8,
-)
+if __name__ == "__main__":
+    surface_main()

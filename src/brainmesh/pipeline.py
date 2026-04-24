@@ -75,7 +75,7 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     return surf
 
 
-def surface_to_mesh(surf_path, out_dir="results", *, numba_threads=8, **tetwild_kwargs):
+def surface_to_mesh(surf_path, out_dir="results", **tetwild_kwargs):
     """
     Tetrahedralise a surface and mark each cell with its anatomical label.
 
@@ -83,12 +83,9 @@ def surface_to_mesh(surf_path, out_dir="results", *, numba_threads=8, **tetwild_
     ----------
     surf_path    : str or Path  path to a .vtk surface with boundary_labels
     out_dir      : str or Path  destination folder
-    numba_threads: int
     **tetwild_kwargs : forwarded to pytetwild.tetrahedralize_pv
     """
-    import numba
     import pytetwild
-    numba.set_num_threads(numba_threads)
 
     from brainmesh import mark_mesh
 
@@ -105,7 +102,6 @@ def surface_to_mesh(surf_path, out_dir="results", *, numba_threads=8, **tetwild_
         edge_length_fac=0.05,
         epsilon=1e-3,
         coarsen=False,
-        num_threads=numba_threads,
     )
     twild_defaults.update(tetwild_kwargs)
 
