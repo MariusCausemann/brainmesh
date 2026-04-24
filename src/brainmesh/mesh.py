@@ -40,9 +40,10 @@ def mark_mesh(mesh, surf):
             F_label = F_out
 
         fwn = igl.fast_winding_number(V_global, F_label, query_points)
-        marker = np.where(marker == 0, cid * np.isclose(fwn, -1, rtol=0.5), marker)
+        # |fwn| ≈ 1 inside, ≈ 0 outside; abs covers either orientation convention
+        marker = np.where(marker == 0, cid * (np.abs(fwn) > 0.5), marker)
 
-    mesh["marker"] = marker
+    mesh.cell_data["marker"] = marker
     mesh = mesh.extract_cells(marker > 0)
     return mesh
 

@@ -28,5 +28,6 @@ env/
 # Project-specific
 results/
 testdata/
+phantom_results/
 
 *__tracked_surface.stl

@@ -34,6 +34,7 @@ from .mesh import (
     mark_interface_facets,
     mark_boundary_facets,
 )
+from .phantom import make_phantom_seg
 
 __all__ = [
     "Label",
@@ -68,4 +69,5 @@ __all__ = [
     "extract_csf",
     "mark_interface_facets",
     "mark_boundary_facets",
+    "make_phantom_seg",
 ]
