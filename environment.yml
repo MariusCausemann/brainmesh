@@ -1,0 +1,17 @@
+name: brainmesh
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - pip
+  - scikit-image
+  - numpy
+  - nibabel
+  - pip:
+    - vtk>=9.6
+    - pyvista
+    - nbmorph
+    - pytetwild
+    - libigl
+    - edt
+    - fastremap
