@@ -33,7 +33,11 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
         create_falx, create_tentorium,
         enforce_csf_around_tentorium, enforce_csf_around_falx,
         extend_brainstem_caudally,
-        get_img
+        get_img,
+        build_inferior_lateral_ventricle_horns,
+        enforce_connected_ventricles,
+        enforce_min_thickness,
+        enforce_tight_ventricles
     )
 
     out_dir = pathlib.Path(out_dir)
@@ -53,8 +57,20 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     data = nbm.mode_box(data)
     data = create_falx(data, hemisphere_distance=6)
     data = create_tentorium(data, distance=3)
+
+    # connect (often disconnected) inf. lateral ventricle horns with 
+    # lateral ventricles
+    data = build_inferior_lateral_ventricle_horns(data, radius=3)
+    # make sure the V4 is not too thin
+    data = enforce_min_thickness(data, Label.FOURTH_VENTRICLE, radius=1)
+    # make sure the ventricles are correctly connected!
+    data = enforce_connected_ventricles(data, min_thickness=2)
+    # add a thin layer of tissue around the ventricles, 
+    # to unphysiological connections
+    data = enforce_tight_ventricles(data, thickness=3)
+
     data = nbm.mode_box(data)
-    data = nbm.diamond_model(data)
+    data = nbm.mode_diamond(data)
 
     data[~orig_mask] = 0
     data = enforce_csf_around_tentorium(data, radius=1)
@@ -126,7 +142,7 @@ def subdivide_SAS(seg_img, parc_img, numba_threads):
     sas_mask = (seg == Label.CSF)
 
     # create the "seed" mask - everything but boundaries and CSF
-    excluded_labels = [Label.CSF, Label.FALX, Label.TENTORIUM, Label.WM_HYPOINTENSITIES]
+    excluded_labels = [Label.CSF, Label.FALX, Label.TENTORIUM, Label.WM_HYPOINTENSITIES] + VENTRICLE_LABELS
     excluded_mask = np.isin(seg, excluded_labels) + np.isin(parc, excluded_labels)
     parc[excluded_mask] = 0
     assert (parc==Label.CSF).sum() == 0
@@ -134,7 +150,8 @@ def subdivide_SAS(seg_img, parc_img, numba_threads):
     # grow seeds into SAS
     labeled_SAS = grow_into_region(parc, ~excluded_mask + sas_mask, radius=2)
     # .. and keep only CSF
-    labeled_SAS[~(sas_mask + np.isin(labeled_SAS, VENTRICLE_LABELS))] = 0
+    labeled_SAS[~sas_mask] = 0
+    labeled_SAS = np.where(np.isin(seg, VENTRICLE_LABELS), seg, labeled_SAS)
 
     labels, counts = np.unique(labeled_SAS, return_counts=True)
     sort_idx = np.argsort(-counts)
