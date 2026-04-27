@@ -31,6 +31,8 @@ homepage = "https://github.com/MariusCausemann/brainmesh"
 [project.scripts]
 brainmesh-surface = "brainmesh.cli:surface_main"
 brainmesh-mesh = "brainmesh.cli:mesh_main"
+brainmesh-subdivideSAS = "brainmesh.cli:subdivide_SAS"
+
 
 [project.optional-dependencies]
 dev = ["pdbpp", "ipython", "mypy", "ruff", "pytest"]

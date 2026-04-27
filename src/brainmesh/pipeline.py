@@ -30,17 +30,16 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
         solidify_csf, close_csf_space,
         fill_wm_hyperintensities, cut_bottom, extend_brainstem,
         enforce_csf_layer,
-        diamond_mode_filter,
         create_falx, create_tentorium,
         enforce_csf_around_tentorium, enforce_csf_around_falx,
         extend_brainstem_caudally,
+        get_img
     )
 
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    seg = nib.load(seg_path)
-    seg = nib.as_closest_canonical(seg)
+    seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
 
     data = solidify_csf(data)
@@ -55,7 +54,7 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     data = create_falx(data, hemisphere_distance=6)
     data = create_tentorium(data, distance=3)
     data = nbm.mode_box(data)
-    data = diamond_mode_filter(data)
+    data = nbm.diamond_model(data)
 
     data[~orig_mask] = 0
     data = enforce_csf_around_tentorium(data, radius=1)
@@ -110,3 +109,35 @@ def surface_to_mesh(surf_path, out_dir="results", **tetwild_kwargs):
     mesh = mark_mesh(mesh, surf)
     mesh.save(out_dir / "mesh_marked.vtk")
     return mesh
+
+
+def subdivide_SAS(seg_img, parc_img, numba_threads):
+    from brainmesh import (Label, get_img, grow_into_region,
+                            reverse_label_map,
+                            VENTRICLE_LABELS)
+    import numba
+    numba.set_num_threads(numba_threads)
+    # get images
+    parc_img, seg_img = get_img(parc_img), get_img(seg_img)
+    parc = parc_img.get_fdata().astype(np.uint16)
+    seg = seg_img.get_fdata().astype(np.uint16)
+
+    # create the SAS mask to fill
+    sas_mask = (seg == Label.CSF)
+
+    # create the "seed" mask - everything but boundaries and CSF
+    excluded_labels = [Label.CSF, Label.FALX, Label.TENTORIUM, Label.WM_HYPOINTENSITIES]
+    excluded_mask = np.isin(seg, excluded_labels) + np.isin(parc, excluded_labels)
+    parc[excluded_mask] = 0
+    assert (parc==Label.CSF).sum() == 0
+
+    # grow seeds into SAS
+    labeled_SAS = grow_into_region(parc, ~excluded_mask + sas_mask, radius=2)
+    # .. and keep only CSF
+    labeled_SAS[~(sas_mask + np.isin(labeled_SAS, VENTRICLE_LABELS))] = 0
+
+    labels, counts = np.unique(labeled_SAS, return_counts=True)
+    sort_idx = np.argsort(-counts)
+    for l, c in zip(labels[sort_idx], counts[sort_idx]):
+        print(f"  - {c:<8} label: {reverse_label_map.get(l, l)}")
+    return nib.Nifti1Image(labeled_SAS, parc_img.affine)

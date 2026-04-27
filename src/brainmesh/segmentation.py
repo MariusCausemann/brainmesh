@@ -4,9 +4,8 @@ import nbmorph
 from numba import njit
 from scipy import ndimage as ndi
 from nbmorph import dilate_labels_spherical as dilate
-from nbmorph import erode_labels_spherical as erode
 
-from .labels import Label, VENTRICLE_LABELS
+from .labels import Label
 from .decorators import track_voxel_changes, plot_voxel_changes, time_func
 
 
@@ -134,3 +133,17 @@ def get_lowest_point(mask):
     idx = np.argwhere(mask)
     ind = np.argsort(idx[:, 2])
     return idx[ind[0]]
+
+@time_func
+def grow_into_region(seed_labels, region_mask, radius=1):
+    grown_labels = np.copy(seed_labels)
+    grown_labels[~region_mask] = 0
+    n_voxels = (grown_labels > 0).sum()
+    while True:
+        grown_labels = dilate(grown_labels, radius=radius)
+        grown_labels[~region_mask] = 0
+        new_voxels = (grown_labels > 0).sum() - n_voxels
+        if new_voxels == 0:
+            break
+        n_voxels += new_voxels
+    return grown_labels

@@ -46,3 +46,20 @@ def mesh_main(argv=None):
         coarsen=args.coarsen,
         quiet=args.quiet,
     )
+
+def subdivide_SAS(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Subdivide the SAS by the nearest cortical parcellation label"
+    )
+    parser.add_argument("--segfile",help="Input segmentation (.nii.gz)")
+    parser.add_argument("--parcfile",help="Input parcellation (.nii.gz)")
+    parser.add_argument("-o", "--outfile", help="Output file")
+    parser.add_argument("--threads", type=int, default=8,
+                        help="Number of numba threads (default: 8)")
+    args = parser.parse_args(argv)
+
+    from brainmesh.pipeline import subdivide_SAS
+    import nibabel as nib
+
+    labeled_SAS = subdivide_SAS(args.segfile,args.parcfile, numba_threads=args.threads)
+    nib.save(labeled_SAS, args.outfile)

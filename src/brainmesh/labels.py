@@ -44,6 +44,13 @@ _labels_dict = {
 BrainLabels = namedtuple('BrainLabels', _labels_dict.keys())
 Label = BrainLabels(**_labels_dict)
 
+reverse_label_map = {
+    getattr(Label, attr): attr
+    for attr in dir(Label)
+    if not attr.startswith('_') and isinstance(getattr(Label, attr), (int, np.integer))
+}
+reverse_label_map[0] = "BACKGROUND (0)"
+
 VENTRICLE_LABELS = [
     Label.LEFT_LATERAL_VENTRICLE,
     Label.LEFT_INFERIOR_LATERAL_VENTRICLE,
@@ -54,3 +61,14 @@ VENTRICLE_LABELS = [
     Label.RIGHT_CHOROID_PLEXUS,
     Label.LEFT_CHOROID_PLEXUS,
 ]
+
+WM_LABELS = [Label.LEFT_CEREBRAL_WHITE_MATTER, 
+             Label.RIGHT_CEREBRAL_WHITE_MATTER]
+GM_LABELS = [Label.LEFT_CEREBRAL_CORTEX, 
+             Label.RIGHT_CEREBRAL_CORTEX]
+
+WM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_WHITE_MATTER, 
+                        Label.RIGHT_CEREBELLUM_WHITE_MATTER]
+GM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_CORTEX, 
+                        Label.RIGHT_CEREBELLUM_CORTEX]
+

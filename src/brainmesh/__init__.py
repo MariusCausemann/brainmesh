@@ -1,6 +1,8 @@
 """brainmesh — create tetrahedral brain meshes from segmentations."""
 
-from .labels import Label, VENTRICLE_LABELS
+from .labels import (Label, reverse_label_map, VENTRICLE_LABELS, 
+                     GM_LABELS, WM_LABELS,
+                     GM_CEREBELLUM_LABELS, WM_CEREBELLUM_LABELS)
 from .io import nibabel_to_pyvista, upsample_nib, get_img
 from .segmentation import (
     solidify_csf,
@@ -12,6 +14,7 @@ from .segmentation import (
     enforce_csf_layer,
     enforce_csf_around_tentorium,
     enforce_csf_around_falx,
+    grow_into_region
 )
 from .anatomy import (
     create_falx,
