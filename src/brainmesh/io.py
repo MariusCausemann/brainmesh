@@ -62,3 +62,9 @@ def nibabel_to_pyvista(nib_img, scalar_name="data"):
 
     grid.cell_data[scalar_name] = data.flatten(order='F')
     return grid
+
+def get_img(img):
+    import nibabel as nib
+    if not isinstance(img, nib.Nifti1Image):
+        img = nib.load(img)
+    return nib.as_closest_canonical(img)
