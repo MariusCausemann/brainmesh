@@ -64,39 +64,6 @@ def cut_bottom(data, offset=10):
 
 
 @njit
-def diamond_mode_filter(data):
-    """
-    Applies a 3D diamond (von Neumann) mode filter.
-    The footprint is 7 voxels: the center and its 6 face-sharing neighbors.
-    """
-    out = data.copy()
-    nx, ny, nz = data.shape
-    offsets = ((0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
-
-    for i in range(1, nx - 1):
-        for j in range(1, ny - 1):
-            for k in range(1, nz - 1):
-                neighbors = np.zeros(7, dtype=data.dtype)
-                for idx in range(7):
-                    dx, dy, dz = offsets[idx]
-                    neighbors[idx] = data[i + dx, j + dy, k + dz]
-
-                best_label = neighbors[0]
-                max_count = 0
-                for idx in range(7):
-                    candidate_label = neighbors[idx]
-                    count = 0
-                    for jdx in range(7):
-                        if neighbors[jdx] == candidate_label:
-                            count += 1
-                    if count > max_count:
-                        max_count = count
-                        best_label = candidate_label
-                out[i, j, k] = best_label
-    return out
-
-
-@njit
 def separate_labels(data, l1, l2, dist, newlabel=Label.CSF, except_labels=None, except_region=None):
     m1 = nbmorph.dilate_labels_spherical(np.isin(data, l1), dist)
     m2 = nbmorph.dilate_labels_spherical(np.isin(data, l2), dist)

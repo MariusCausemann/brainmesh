@@ -1,14 +1,13 @@
 """brainmesh — create tetrahedral brain meshes from segmentations."""
 
 from .labels import Label, VENTRICLE_LABELS
-from .io import nibabel_to_pyvista, upsample_nib
+from .io import nibabel_to_pyvista, upsample_nib, get_img
 from .segmentation import (
     solidify_csf,
     close_csf_space,
     fill_holes_csf,
     fill_wm_hyperintensities,
     cut_bottom,
-    diamond_mode_filter,
     enforce_min_thickness,
     enforce_csf_layer,
     enforce_csf_around_tentorium,
@@ -46,7 +45,6 @@ __all__ = [
     "fill_holes_csf",
     "fill_wm_hyperintensities",
     "cut_bottom",
-    "diamond_mode_filter",
     "enforce_min_thickness",
     "enforce_csf_layer",
     "enforce_csf_around_tentorium",
