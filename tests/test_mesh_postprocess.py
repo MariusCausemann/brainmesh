@@ -110,7 +110,7 @@ def test_mark_boundary_facets_split_box(split_box_mesh):
     assert np.isclose(boundaries.area, 10.0, rtol=0.01)
 
     # And it should agree with PyVista's extract_surface for cross-validation
-    surf_area = split_box_mesh.extract_surface().triangulate().area
+    surf_area = split_box_mesh.extract_surface(algorithm="dataset_surface").triangulate().area
     assert np.isclose(boundaries.area, surf_area, rtol=0.01)
 
 
