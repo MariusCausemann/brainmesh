@@ -181,9 +181,8 @@ def test_remark_csf_with_sas():
     """
     Build a two-tet mesh (one CSF, one WM) and a tiny NIfTI where the CSF tet
     centroid falls on a voxel labelled 1001.  Verify that:
-    - the CSF tet gets marker 1001
+    - the CSF tet gets marker 1001 + SAS_LABEL_OFFSET = 11001
     - the WM tet is untouched
-    - a tet centroid mapping to a 0 voxel keeps its CSF marker
     """
     import nibabel as nib
 
@@ -207,15 +206,16 @@ def test_remark_csf_with_sas():
 
     remark_csf_with_sas(mesh, sas_img)
 
+    from brainmesh.labels import SAS_LABEL_OFFSET
     markers = mesh.cell_data["marker"]
-    # CSF tet → remapped to 1001
-    assert markers[0] == 1001
+    # CSF tet → remapped to 1001 + SAS_LABEL_OFFSET
+    assert markers[0] == 1001 + SAS_LABEL_OFFSET
     # WM tet → unchanged
     assert markers[1] == Label.LEFT_CEREBRAL_WHITE_MATTER
 
 
 def test_remark_csf_with_sas_zero_voxel_fallback():
-    """A CSF tet centroid landing on a 0 voxel must keep its original CSF marker."""
+    """An all-zero SAS NIfTI (no labeled voxels) must leave all markers unchanged."""
     import nibabel as nib
 
     points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)

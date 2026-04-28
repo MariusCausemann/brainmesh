@@ -60,7 +60,21 @@ brainmesh-mark-facets results/mesh_marked_sas.vtk -o results/facets.vtk
 | `-o` / `--output` | `facets.vtk` | Output path for the combined facet mesh |
 | `--label-array` | `marker` | Cell data array used for region markers |
 
-The output carries a single `interface_id` cell array: interface facets are encoded as `min(a, b) * 100000 + max(a, b)` for the two adjacent region markers (decode with `a, b = id // 100000, id % 100000`); boundary facets use their region marker directly; spinal facets are encoded as `0`.
+The output carries a single `interface_id` cell array using the following scheme:
+
+| `interface_id` range | Meaning | Decode |
+|---|---|---|
+| `99` | Spinal opening (`SPINAL_ID`) | — |
+| `2–12035` | Outer boundary | value = adjacent region marker |
+| `≥ 100000` | Internal interface | `a, b = divmod(id, 100000)` |
+
+**Volume marker IDs** (tet mesh `marker` array):
+
+| Range | Meaning |
+|---|---|
+| `2–77` | FreeSurfer aseg anatomy (unchanged) |
+| `11001–11035` | LH SAS parcels — decode: `fs_aparc = marker - 10000` |
+| `12001–12035` | RH SAS parcels — decode: `fs_aparc = marker - 10000` |
 
 `brainmesh-curve-mesh` accepts the following options:
 

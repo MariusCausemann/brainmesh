@@ -109,10 +109,11 @@ def mark_facets_main(argv=None):
     combined = mark_facets(mesh, label_array=args.label_array,
                            max_angle=args.max_angle, max_distance=args.max_distance)
     combined.save(args.output)
-    ids = combined.cell_data["interface_id"]
     import numpy as np
-    print(f"Saved {(ids >= 100000).sum()} interface + {((ids > 0) & (ids < 100000)).sum()} boundary"
-          f" + {(ids == 0).sum()} spinal facets → {args.output}")
+    from brainmesh.labels import SPINAL_ID
+    ids = combined.cell_data["interface_id"]
+    print(f"Saved {(ids >= 100000).sum()} interface + {((ids > 0) & (ids < 100000) & (ids != SPINAL_ID)).sum()} boundary"
+          f" + {(ids == SPINAL_ID).sum()} spinal facets → {args.output}")
 
 
 def remark_sas_main(argv=None):

@@ -44,6 +44,20 @@ _labels_dict = {
 BrainLabels = namedtuple('BrainLabels', _labels_dict.keys())
 Label = BrainLabels(**_labels_dict)
 
+SAS_LABEL_OFFSET = 10000
+SPINAL_ID = 99
+
+
+def fs_aparc_to_sas_marker(label):
+    """Map a FreeSurfer aparc label to a brainmesh SAS marker (label + SAS_LABEL_OFFSET)."""
+    return label + SAS_LABEL_OFFSET
+
+
+def sas_marker_to_fs_aparc(label):
+    """Recover the original FreeSurfer aparc label from a brainmesh SAS marker."""
+    return label - SAS_LABEL_OFFSET
+
+
 reverse_label_map = {
     getattr(Label, attr): attr
     for attr in dir(Label)

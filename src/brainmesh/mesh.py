@@ -5,7 +5,7 @@ import pyvista as pv
 
 from .decorators import time_func
 from .io import get_img
-from .labels import Label, VENTRICLE_LABELS
+from .labels import Label, VENTRICLE_LABELS, SAS_LABEL_OFFSET, SPINAL_ID
 
 
 @time_func
@@ -63,14 +63,17 @@ def remark_csf_with_sas(mesh, sas_img, csf_label=Label.CSF, label_array="marker"
     from .io import nibabel_to_pyvista
 
     sas = nibabel_to_pyvista(get_img(sas_img))
-    sas.save("sas.vti")
     sas = sas.extract_cells(sas.cell_data["data"] > 0)
+    if sas.n_cells == 0:
+        return mesh
     kd_tree = KDTree(sas.cell_centers().points)
     mesh_cell_centers = mesh.cell_centers().points.astype(np.float32)
     _, nearest_idx = kd_tree.query(mesh_cell_centers)
-    sas_marker = sas.cell_data["data"].astype(np.uint32)
+    # Raw FS parcellation labels from the NIfTI; offset to brainmesh SAS marker range
+    sas_marker = sas.cell_data["data"].astype(np.int32)
     mesh_marker = mesh.cell_data[label_array].copy()
-    mesh_marker[mesh_marker==csf_label] = sas_marker[nearest_idx][mesh_marker==csf_label]
+    csf_mask = mesh_marker == csf_label
+    mesh_marker[csf_mask] = sas_marker[nearest_idx][csf_mask] + SAS_LABEL_OFFSET
     mesh.cell_data[label_array] = mesh_marker
     return mesh
 
@@ -279,6 +282,7 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
 
     faces = topo["boundary_faces"]
     boundary = markers[topo["boundary_parents"]].astype(np.int64)
+    print(boundary.max())
 
     # Corner nodes are always the first 3 (same for linear and quadratic faces).
     corners = points[faces[:, :3]]          # (N, 3, 3)
@@ -298,7 +302,7 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     normals[inward] *= -1
 
     # Criterion 1: parent tet is a CSF cell.
-    csf_mask = np.isin(boundary, csf_labels)
+    csf_mask = np.isin(boundary, csf_labels) + (boundary > 10000)
 
     # Criterion 2: outward normal within max_angle of (0, 0, -1).
     cos_thresh = np.cos(np.deg2rad(max_angle))
@@ -344,7 +348,7 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
     * Regular boundary facets (outer surface, non-spinal):
       the region marker of the adjacent tet
     * Spinal boundary facets (lowest CSF boundary, downward-facing):
-      ``0``
+      ``SPINAL_ID`` (= 99)
 
     Parameters
     ----------
@@ -357,7 +361,7 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
                                          (in mesh units)
     encoding_base : int                  multiplier for the interface ID encoding;
                                          must exceed the maximum label value
-                                         (default 100000, handles aparc labels ≤ 9999)
+                                         (default 100000, handles SAS markers ≤ ~12035)
 
     Returns a :class:`pyvista.PolyData` or :class:`pyvista.UnstructuredGrid` that
     shares the parent's point array, with an ``interface_id`` cell data array.
@@ -385,7 +389,7 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
     regular_faces = bnd_faces[~is_spinal]
     regular_ids   = bnd_ids[~is_spinal]
     spinal_faces  = bnd_faces[is_spinal]
-    spinal_ids    = np.zeros(is_spinal.sum(), dtype=np.int64)
+    spinal_ids    = np.full(is_spinal.sum(), SPINAL_ID, dtype=np.int64)
 
     int_faces = _raw_faces(interfaces)
     all_faces = np.vstack([int_faces, regular_faces, spinal_faces]) if (
