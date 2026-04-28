@@ -26,6 +26,7 @@ from .anatomy import (
     enforce_tight_ventricles,
     extend_brainstem,
     extend_brainstem_caudally,
+    _connect_by_line
 )
 from .surface import transfer_labels, coarsen_surface, straighten_spinal_interface
 from .mesh import (
