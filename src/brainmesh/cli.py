@@ -87,6 +87,61 @@ def curve_mesh_main(argv=None):
     print(f"Success! Snapped mesh saved to: {args.output}")
 
 
+def mark_facets_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Extract and save internal interface facets and external boundary facets of a marked tetrahedral mesh."
+    )
+    parser.add_argument("mesh", help="Input marked tetrahedral mesh (.vtk, .vtu, ...)")
+    parser.add_argument("-o", "--output", default="facets.vtk",
+                        help="Output file for combined facet mesh (default: facets.vtk)")
+    parser.add_argument("--label-array", default="marker",
+                        help="Cell data array used for region markers (default: marker)")
+    parser.add_argument("--max-angle", type=float, default=10.0,
+                        help="Max angle (degrees) from downward for spinal boundary detection (default: 10)")
+    parser.add_argument("--max-distance", type=float, default=0.5,
+                        help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
+    args = parser.parse_args(argv)
+
+    import pyvista as pv
+    from brainmesh.mesh import mark_facets
+
+    mesh = pv.read(args.mesh)
+    combined = mark_facets(mesh, label_array=args.label_array,
+                           max_angle=args.max_angle, max_distance=args.max_distance)
+    combined.save(args.output)
+    ids = combined.cell_data["interface_id"]
+    import numpy as np
+    print(f"Saved {(ids >= 100000).sum()} interface + {((ids > 0) & (ids < 100000)).sum()} boundary"
+          f" + {(ids == 0).sum()} spinal facets → {args.output}")
+
+
+def remark_sas_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Re-label CSF tetrahedra with subdivided SAS labels from a NIfTI parcellation."
+    )
+    parser.add_argument("mesh", help="Marked tetrahedral mesh (.vtk, .vtu, ...)")
+    parser.add_argument("sas", help="SAS subdivision NIfTI (.nii.gz) from brainmesh-subdivide-sas")
+    parser.add_argument("-o", "--output", default="mesh_marked_sas.vtk",
+                        help="Output path for the re-labelled mesh (default: mesh_marked_sas.vtk)")
+    parser.add_argument("--label-array", default="marker",
+                        help="Cell data array used for region markers (default: marker)")
+    args = parser.parse_args(argv)
+
+    import numpy as np
+    import pyvista as pv
+    from brainmesh.labels import Label
+    from brainmesh.mesh import remark_csf_with_sas
+
+    mesh = pv.read(args.mesh)
+    remark_csf_with_sas(mesh, args.sas, label_array=args.label_array)
+    mesh.save(args.output)
+
+    markers = mesh.cell_data[args.label_array]
+    n_csf = (markers == Label.CSF).sum()
+    n_sas = np.sum((markers > 0) & (markers != Label.CSF))
+    print(f"Saved {args.output}: {n_sas} SAS-subdivided + {n_csf} unmarked CSF tets")
+
+
 def subdivide_SAS(argv=None):
     parser = argparse.ArgumentParser(
         description="Subdivide the SAS by the nearest cortical parcellation label"

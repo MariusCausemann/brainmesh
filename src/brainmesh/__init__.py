@@ -31,11 +31,14 @@ from .anatomy import (
 from .surface import transfer_labels, coarsen_surface, straighten_spinal_interface
 from .mesh import (
     mark_mesh,
+    remark_csf_with_sas,
     load_marked_mesh,
     filter_by_label,
     extract_csf,
     mark_interface_facets,
     mark_boundary_facets,
+    mark_spinal_boundary,
+    mark_facets,
 )
 from .phantom import make_phantom_seg
 
@@ -66,10 +69,13 @@ __all__ = [
     "coarsen_surface",
     "straighten_spinal_interface",
     "mark_mesh",
+    "remark_csf_with_sas",
     "load_marked_mesh",
     "filter_by_label",
     "extract_csf",
     "mark_interface_facets",
     "mark_boundary_facets",
+    "mark_spinal_boundary",
+    "mark_facets",
     "make_phantom_seg",
 ]

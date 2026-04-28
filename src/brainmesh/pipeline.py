@@ -149,12 +149,13 @@ def subdivide_SAS(seg_img, parc_img, numba_threads):
 
     # create the "seed" mask - everything but boundaries and CSF
     excluded_labels = [Label.CSF, Label.FALX, Label.TENTORIUM, Label.WM_HYPOINTENSITIES] + VENTRICLE_LABELS
-    excluded_mask = np.isin(seg, excluded_labels) + np.isin(parc, excluded_labels)
+    excluded_mask = np.isin(seg, excluded_labels) | np.isin(parc, excluded_labels)
     parc[excluded_mask] = 0
     assert (parc==Label.CSF).sum() == 0
 
     # grow seeds into SAS
-    labeled_SAS = grow_into_region(parc, ~excluded_mask + sas_mask, radius=2)
+    region_mask = sas_mask + (parc >0) 
+    labeled_SAS = grow_into_region(parc, region_mask, radius=1)
     # .. and keep only CSF
     labeled_SAS[~sas_mask] = 0
     labeled_SAS = np.where(np.isin(seg, VENTRICLE_LABELS), seg, labeled_SAS)

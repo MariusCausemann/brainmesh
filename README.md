@@ -32,9 +32,35 @@ brainmesh-surface testdata/sub1_gouhfi_hybrid_seg.nii.gz -o results/
 # Step 2: surface → tetrahedral mesh
 brainmesh-mesh results/surf.vtk -o results/
 
-# Step 3 (optional): convert to quadratic and snap boundaries to the surface mesh
+# Step 3 (optional): subdivide the SAS by cortical parcellation, then re-label CSF tets
+brainmesh-subdivideSAS --segfile results/seg.nii.gz --parcfile parc.nii.gz -o results/sas_subdivide.nii.gz
+brainmesh-remark-sas results/mesh_marked.vtk results/sas_subdivide.nii.gz -o results/mesh_marked_sas.vtk
+
+# Step 4 (optional): convert to quadratic and snap boundaries to the surface mesh
 brainmesh-curve-mesh -i results/mesh_marked.vtk -t results/surf.vtk -o results/mesh_curved.vtk
+
+# Extract and combine interface and boundary facets into a single mesh
+brainmesh-mark-facets results/mesh_marked_sas.vtk -o results/facets.vtk
 ```
+
+`brainmesh-remark-sas` accepts the following options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `mesh` | *(required)* | Marked tetrahedral mesh (`.vtk`, `.vtu`, …) |
+| `sas` | *(required)* | SAS subdivision NIfTI (`.nii.gz`) from `brainmesh-subdivideSAS` |
+| `-o` / `--output` | `mesh_marked_sas.vtk` | Output path for the re-labelled mesh |
+| `--label-array` | `marker` | Cell data array used for region markers |
+
+`brainmesh-mark-facets` accepts the following options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `mesh` | *(required)* | Marked tetrahedral mesh (`.vtk`, `.vtu`, …) |
+| `-o` / `--output` | `facets.vtk` | Output path for the combined facet mesh |
+| `--label-array` | `marker` | Cell data array used for region markers |
+
+The output carries a single `interface_id` cell array: interface facets are encoded as `min(a, b) * 100000 + max(a, b)` for the two adjacent region markers (decode with `a, b = id // 100000, id % 100000`); boundary facets use their region marker directly; spinal facets are encoded as `0`.
 
 `brainmesh-curve-mesh` accepts the following options:
 

@@ -140,7 +140,7 @@ def grow_into_region(seed_labels, region_mask, radius=1):
     grown_labels[~region_mask] = 0
     n_voxels = (grown_labels > 0).sum()
     while True:
-        grown_labels = dilate(grown_labels, radius=radius)
+        grown_labels = dilate(grown_labels, radius=radius, struct_sequence="D")
         grown_labels[~region_mask] = 0
         new_voxels = (grown_labels > 0).sum() - n_voxels
         if new_voxels == 0:

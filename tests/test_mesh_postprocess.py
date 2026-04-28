@@ -9,6 +9,8 @@ from brainmesh.mesh import (
     filter_by_label,
     mark_boundary_facets,
     mark_interface_facets,
+    mark_spinal_boundary,
+    remark_csf_with_sas,
 )
 
 
@@ -112,6 +114,121 @@ def test_mark_boundary_facets_split_box(split_box_mesh):
     # And it should agree with PyVista's extract_surface for cross-validation
     surf_area = split_box_mesh.extract_surface(algorithm="dataset_surface").triangulate().area
     assert np.isclose(boundaries.area, surf_area, rtol=0.01)
+
+
+@pytest.fixture(scope="module")
+def csf_box_mesh():
+    """
+    Box [0,2]×[0,1]×[0,1] split at z=0.5: bottom half is Label.CSF, top half is WM.
+
+    The expected spinal boundary is the z=0 face — outer CSF boundary with
+    downward-pointing normals.
+    """
+    import pytetwild
+    surf = pv.Box(bounds=(0, 2, 0, 1, 0, 1)).triangulate().subdivide(2)
+    mesh = pytetwild.tetrahedralize_pv(surf, edge_length_fac=0.1, stop_energy=10, quiet=True)
+    centroids = mesh.cell_centers().points
+    mesh.cell_data["marker"] = np.where(
+        centroids[:, 2] < 0.5,
+        Label.CSF,
+        Label.LEFT_CEREBRAL_WHITE_MATTER,
+    ).astype(np.int32)
+    return mesh
+
+
+@pytest.mark.slow
+def test_mark_spinal_boundary_finds_bottom_csf_face(csf_box_mesh):
+    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=30.0, max_distance=0.1)
+    assert spinal.n_cells > 0
+    # All selected facet centroids must be near z=0 (the bottom face).
+    centroids = spinal.cell_centers().points
+    assert centroids[:, 2].max() < 0.05
+    # All selected facets must belong to the CSF region.
+    assert np.all(spinal.cell_data["boundary"] == Label.CSF)
+
+
+@pytest.mark.slow
+def test_mark_spinal_boundary_preserves_point_array(csf_box_mesh):
+    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=30.0, max_distance=0.1)
+    assert spinal.n_points == csf_box_mesh.n_points
+    np.testing.assert_array_equal(spinal.points, csf_box_mesh.points)
+
+
+@pytest.mark.slow
+def test_mark_spinal_boundary_tight_angle_excludes_side_faces(csf_box_mesh):
+    """Side faces of the CSF region have horizontal normals and must not be selected."""
+    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=10.0, max_distance=0.2)
+    if spinal.n_cells > 0:
+        centroids = spinal.cell_centers().points
+        # No selected face should have a centroid far from z=0.
+        assert centroids[:, 2].max() < 0.05
+
+
+@pytest.mark.slow
+def test_mark_spinal_boundary_ignores_non_csf_labels(csf_box_mesh):
+    """With csf_labels set to WM only, the bottom face (CSF) must not be returned."""
+    spinal = mark_spinal_boundary(
+        csf_box_mesh,
+        csf_labels=[Label.LEFT_CEREBRAL_WHITE_MATTER],
+        max_angle=30.0,
+        max_distance=0.1,
+    )
+    # WM is at the top — its outer boundary faces have upward normals, not downward.
+    assert spinal.n_cells == 0
+
+
+def test_remark_csf_with_sas():
+    """
+    Build a two-tet mesh (one CSF, one WM) and a tiny NIfTI where the CSF tet
+    centroid falls on a voxel labelled 1001.  Verify that:
+    - the CSF tet gets marker 1001
+    - the WM tet is untouched
+    - a tet centroid mapping to a 0 voxel keeps its CSF marker
+    """
+    import nibabel as nib
+
+    # Two-tet mesh sharing a face at z=0
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0],
+                       [0, 0, 1], [0, 0, -1]], dtype=float)
+    cells = np.array([4, 0, 1, 2, 3,  4, 0, 1, 2, 4])
+    cell_types = np.array([pv.CellType.TETRA, pv.CellType.TETRA])
+    mesh = pv.UnstructuredGrid(cells, cell_types, points)
+    # tet 0 centroid ≈ (0.25, 0.25, 0.25) → CSF; tet 1 centroid ≈ (0.25, 0.25, -0.25) → WM
+    mesh.cell_data["marker"] = np.array([Label.CSF, Label.LEFT_CEREBRAL_WHITE_MATTER],
+                                        dtype=np.int32)
+
+    # NIfTI: 4×4×4 voxels, 1 mm isotropic, origin at (0,0,0)
+    # Voxel (0,0,0) covers [0,1)³ — centroid (0.25,0.25,0.25) lands here → label 1001
+    # Voxel (0,0,0) in the negative-z half covers (0.25,0.25,-0.25) → label 0 (background)
+    seg_data = np.zeros((4, 4, 4), dtype=np.int32)
+    seg_data[0, 0, 0] = 1001   # positive-z half: SAS parcel
+    affine = np.eye(4)          # 1 mm voxels, no offset
+    sas_img = nib.Nifti1Image(seg_data, affine)
+
+    remark_csf_with_sas(mesh, sas_img)
+
+    markers = mesh.cell_data["marker"]
+    # CSF tet → remapped to 1001
+    assert markers[0] == 1001
+    # WM tet → unchanged
+    assert markers[1] == Label.LEFT_CEREBRAL_WHITE_MATTER
+
+
+def test_remark_csf_with_sas_zero_voxel_fallback():
+    """A CSF tet centroid landing on a 0 voxel must keep its original CSF marker."""
+    import nibabel as nib
+
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+    cells = np.array([4, 0, 1, 2, 3])
+    cell_types = np.array([pv.CellType.TETRA])
+    mesh = pv.UnstructuredGrid(cells, cell_types, points)
+    mesh.cell_data["marker"] = np.array([Label.CSF], dtype=np.int32)
+
+    # All-zero NIfTI → centroid maps to background
+    sas_img = nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.int32), np.eye(4))
+    remark_csf_with_sas(mesh, sas_img)
+
+    assert mesh.cell_data["marker"][0] == Label.CSF
 
 
 @pytest.mark.slow
