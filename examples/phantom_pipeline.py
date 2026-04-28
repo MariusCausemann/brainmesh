@@ -25,8 +25,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-o", "--out-dir", default="phantom_results",
                         help="Output directory (default: phantom_results)")
-    parser.add_argument("--shape", type=int, default=180,
-                        help="Cubic volume side length in voxels (default: 180)")
+    parser.add_argument("--shape", type=int, default=360,
+                        help="Cubic volume side length in voxels (default: 360)")
     parser.add_argument("--spacing", type=float, default=0.5,
                         help="Voxel spacing in mm (default: 0.5)")
     parser.add_argument("--threads", type=int, default=8,

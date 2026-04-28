@@ -3,10 +3,11 @@ import numpy as np
 import nibabel as nib
 from scipy import ndimage as ndi
 
+from .anatomy import _connect_by_line
 from .labels import Label
 
 
-def make_phantom_seg(shape=(180, 180, 180), spacing=0.5):
+def make_phantom_seg(shape=(360, 360, 360), spacing=0.5, scale=2.0):
     """
     Build a synthetic simplified-brain segmentation as a nibabel image.
 
@@ -24,9 +25,13 @@ def make_phantom_seg(shape=(180, 180, 180), spacing=0.5):
     Parameters
     ----------
     shape : tuple of int
-        Volume shape in voxels (default 180^3 ≈ 90 mm cube at 0.5 mm).
+        Volume shape in voxels (default 360^3 ≈ 180 mm cube at 0.5 mm).
     spacing : float
         Isotropic voxel spacing in mm.
+    scale : float
+        Geometric scale factor for all anatomical structures (default 2.0,
+        approximately full adult-brain size). Set to 1.0 for the half-size
+        phantom, or other values to scale uniformly.
     """
     Nx, Ny, Nz = shape
     data = np.zeros(shape, dtype=np.uint8)
@@ -35,6 +40,8 @@ def make_phantom_seg(shape=(180, 180, 180), spacing=0.5):
     Y = (np.arange(Ny) - Ny / 2 + 0.5) * spacing
     Z = (np.arange(Nz) - Nz / 2 + 0.5) * spacing
     X, Y, Z = np.meshgrid(X, Y, Z, indexing="ij")
+
+    s = scale
 
     def ellipsoid(cx, cy, cz, rx, ry, rz):
         return ((X - cx) / rx) ** 2 + ((Y - cy) / ry) ** 2 + ((Z - cz) / rz) ** 2 < 1
@@ -47,32 +54,56 @@ def make_phantom_seg(shape=(180, 180, 180), spacing=0.5):
         (-1, Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER, Label.LEFT_LATERAL_VENTRICLE),
         (+1, Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER, Label.RIGHT_LATERAL_VENTRICLE),
     ]:
-        cx, cy, cz = sign * 18, 0, 8
-        data[ellipsoid(cx, cy, cz, 22, 28, 22)] = lc
-        data[ellipsoid(cx, cy, cz, 18, 24, 18)] = lw
-        data[ellipsoid(sign * 8, 0, 8, 4, 12, 5) & (data == lw)] = lv
+        cx, cy, cz = sign * 14 * s, 0, 8 * s
+        data[ellipsoid(cx, cy, cz, 22 * s, 28 * s, 22 * s) & (sign * X > 0)] = lc
+        data[ellipsoid(cx, cy, cz, 18 * s, 24 * s, 18 * s) & (sign * X > 0)] = lw
+        data[ellipsoid(sign * 8 * s, 0, 8 * s, 4 * s, 12 * s, 5 * s) & (data == lw)] = lv
+
+    # Ventral DC: subcortical structures flanking the midline.
+    for sign, lvdc in [
+        (-1, Label.LEFT_VENTRAL_DC),
+        (+1, Label.RIGHT_VENTRAL_DC),
+    ]:
+        data[
+            ellipsoid(sign * 4 * s, 0, -3 * s, 8 * s, 12 * s, 8 * s)
+            & (sign * X > 0)
+            & np.isin(data, [Label.LEFT_CEREBRAL_WHITE_MATTER,
+                             Label.LEFT_CEREBRAL_CORTEX,
+                             Label.RIGHT_CEREBRAL_WHITE_MATTER,
+                             Label.RIGHT_CEREBRAL_CORTEX,
+                             Label.BRAIN_STEM])
+        ] = lvdc
 
     # Third ventricle, midline
-    data[ellipsoid(0, 0, 4, 2, 8, 4) & (data > 0)] = Label.THIRD_VENTRICLE
+    data[ellipsoid(0, 0, 4 * s, 2 * s, 8 * s, 4 * s) & (data > 0)] = Label.THIRD_VENTRICLE
 
     # Brainstem (vertical cylinder, slightly posterior)
-    data[cylinder_z(0, 4, 5, -32, -2) & (data == 0)] = Label.BRAIN_STEM
+    data[cylinder_z(0, 4 * s, 5 * s, -30 * s, -2 * s) & (data == 0)] = Label.BRAIN_STEM
 
-    # Fourth ventricle inside the brainstem
-    data[ellipsoid(0, 4, -10, 1.5, 2, 4) & (data == Label.BRAIN_STEM)] = Label.FOURTH_VENTRICLE
+    # Fourth ventricle inside the brainstem, with median aperture connection
+    data[
+        ellipsoid(0, 4 * s, -10 * s, 1.5 * s, 2 * s, 4 * s)
+    ] = Label.FOURTH_VENTRICLE
+    median_ap_outlet = ellipsoid(0, 10 * s, -20 * s, 1 * s, 1 * s, 1 * s)
+    median_aperture = _connect_by_line(
+        data == Label.FOURTH_VENTRICLE,
+        median_ap_outlet,
+        radius=max(1, int(round(s))),
+    )
+    data[median_aperture] = Label.FOURTH_VENTRICLE
 
     # Cerebellum (posterior-inferior, two hemispheres)
     for sign, cc, cw in [
         (-1, Label.LEFT_CEREBELLUM_CORTEX, Label.LEFT_CEREBELLUM_WHITE_MATTER),
         (+1, Label.RIGHT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_WHITE_MATTER),
     ]:
-        cx, cy, cz = sign * 11, 22, -12
-        data[ellipsoid(cx, cy, cz, 12, 12, 10) & (data == 0)] = cc
-        data[ellipsoid(cx, cy, cz, 9, 9, 7) & (data == cc)] = cw
+        cx, cy, cz = sign * 11 * s, 12 * s, -12 * s
+        data[ellipsoid(cx, cy, cz, 12 * s, 12 * s, 10 * s) & (data == 0)] = cc
+        data[ellipsoid(cx, cy, cz, 9 * s, 9 * s, 7 * s) & (data == cc)] = cw
 
     # WM hyperintensity pocket — fill_wm_hyperintensities should consume this
     data[
-        ellipsoid(-15, -8, 10, 1.5, 1.5, 1.5)
+        ellipsoid(-15 * s, -8 * s, 10 * s, 1.5 * s, 1.5 * s, 1.5 * s)
         & (data == Label.LEFT_CEREBRAL_WHITE_MATTER)
     ] = Label.WM_HYPOINTENSITIES
 

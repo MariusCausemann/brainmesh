@@ -20,15 +20,17 @@ from .segmentation import (
 
 @njit
 def separate_hemispheres(data, distance=4):
+    LVs = [Label.LEFT_LATERAL_VENTRICLE + Label.RIGHT_LATERAL_VENTRICLE]
     cc_interface = (
         dilate(data == Label.LEFT_CEREBRAL_WHITE_MATTER, radius=2)
         & dilate(data == Label.RIGHT_CEREBRAL_WHITE_MATTER, radius=2)
+        #& dilate(np.isin(data, LVs), radius=30)
     )
     cc_exclusion_mask = dilate(cc_interface + (data == Label.THIRD_VENTRICLE), radius=20)
     return separate_labels(
         data,
-        [Label.RIGHT_CEREBRAL_CORTEX],
-        [Label.LEFT_CEREBRAL_CORTEX],
+        [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER],
+        [Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER],
         distance,
         except_region=cc_exclusion_mask,
     )
@@ -88,7 +90,6 @@ def create_falx(data, hemisphere_distance=4, sigma=20):
     from skimage.filters import gaussian
 
     data = separate_hemispheres(data, distance=hemisphere_distance)
-
     right_mask = np.isin(data, [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER])
     left_mask = np.isin(data, [Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER])
 
@@ -109,9 +110,8 @@ def create_falx(data, hemisphere_distance=4, sigma=20):
     exl_mask = np.isin(data, [
         Label.RIGHT_VENTRAL_DC,
         Label.LEFT_VENTRAL_DC,
-        Label.RIGHT_LATERAL_VENTRICLE,
-        Label.LEFT_LATERAL_VENTRICLE,
-    ])
+        Label.BRAIN_STEM,
+    ] + VENTRICLE_LABELS)
     exl_mask += cc_interface
 
     falx_mask[dilate(exl_mask, radius=4)] = 0
@@ -136,19 +136,21 @@ def create_tentorium(data, distance=4, sigma=6):
         Label.RIGHT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_CORTEX,
         Label.RIGHT_CEREBRAL_WHITE_MATTER, Label.LEFT_CEREBRAL_WHITE_MATTER,
     ])
-    ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_CORTEX])
+    ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, 
+                              Label.RIGHT_CEREBELLUM_CORTEX,
+                              Label.LEFT_CEREBELLUM_WHITE_MATTER,
+                              Label.RIGHT_CEREBELLUM_WHITE_MATTER])
 
     smooth_cer = gaussian(cer_mask.astype(np.float32), sigma=sigma)
     smooth_ceb = gaussian(ceb_mask.astype(np.float32), sigma=sigma)
     phantom_ceb = gaussian(ceb_mask.astype(np.float32), sigma=sigma * 3)
-    print(smooth_cer.max())
-    print(smooth_ceb.max())
-    print(phantom_ceb.max())
     cer_territory = smooth_cer > np.maximum(smooth_ceb, phantom_ceb)
 
     tent_mask = dilate(cer_territory, radius=1) ^ cer_territory
     tent_mask[~dilate(ceb_mask + cer_mask, radius=12)] = 0
-    tent_mask[dilate(data == Label.BRAIN_STEM, radius=10)] = 0
+    tent_mask[dilate(np.isin(data, [Label.BRAIN_STEM, 
+                                    Label.LEFT_VENTRAL_DC, 
+                                    Label.RIGHT_VENTRAL_DC]), radius=10)] = 0
     tent_mask = dilate(tent_mask, radius=1)
     tent_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 

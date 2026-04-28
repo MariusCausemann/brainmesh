@@ -14,9 +14,9 @@ from brainmesh.pipeline import segmentation_to_surface, surface_to_mesh
 
 @pytest.mark.slow
 def test_phantom_pipeline_end_to_end(tmp_path):
-    """Run cleanup → surface → tets → facets on a 100^3 phantom."""
+    """Run cleanup → surface → tets → facets on a 360^3 phantom (full-size, scale=2)."""
     seg_path = tmp_path / "phantom_seg.nii.gz"
-    nib.save(make_phantom_seg(shape=(100, 100, 100), spacing=0.5), seg_path)
+    nib.save(make_phantom_seg(shape=(360, 360, 360), spacing=0.5, scale=2.0), seg_path)
 
     surf = segmentation_to_surface(seg_path, out_dir=tmp_path, numba_threads=4)
     assert surf.n_cells > 0
