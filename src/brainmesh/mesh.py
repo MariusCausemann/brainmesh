@@ -83,29 +83,47 @@ def extract_csf(mesh, label_array="marker"):
 
 def _tet_face_topology(mesh):
     """
-    Group all triangular faces of a tet mesh by their canonical (sorted)
-    vertex triple, so adjacent tets sharing a face can be matched.
+    Group all triangular (or quadratic triangular) faces of a tet mesh by their 
+    canonical (sorted) corner vertex triple, so adjacent tets sharing a face can be matched.
 
     Returns a dict with arrays:
-      boundary_faces      (M, 3)  outer-surface triangles (one parent tet)
-      boundary_parents    (M,)    parent tet index for each boundary face
-      interface_faces     (N, 3)  triangles shared by two tets
-      interface_parents_a (N,)    parent tet index for one side
-      interface_parents_b (N,)    parent tet index for the other side
-
-    Triangle vertex indices are returned in the order they appear in the
-    parent tet (not sorted), preserving the original outward orientation.
-    Assumes a manifold tet mesh (each face shared by ≤ 2 tets).
+      boundary_faces      (M, 3 or 6) outer-surface triangles (one parent tet)
+      boundary_parents    (M,)        parent tet index for each boundary face
+      interface_faces     (N, 3 or 6) triangles shared by two tets
+      interface_parents_a (N,)        parent tet index for one side
+      interface_parents_b (N,)        parent tet index for the other side
     """
-    cells = mesh.cells_dict.get(pv.CellType.TETRA)
-    if cells is None or len(cells) == 0:
-        raise ValueError("Input mesh has no tetrahedral cells.")
-    n_tets = len(cells)
+    # Check for linear or quadratic tets
+    cells_lin = mesh.cells_dict.get(pv.CellType.TETRA)
+    cells_quad = mesh.cells_dict.get(pv.CellType.QUADRATIC_TETRA)
 
-    face_indices = np.array([[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]])
-    faces = cells[:, face_indices].reshape(-1, 3)
+    if cells_quad is not None and len(cells_quad) > 0:
+        cells = cells_quad
+        # VTK Quadratic Tet Ordering: 
+        # Corners: 0,1,2,3. Edges: 4(0,1), 5(1,2), 6(2,0), 7(0,3), 8(1,3), 9(2,3)
+        # We extract 6-node faces: [corner1, corner2, corner3, edge1, edge2, edge3]
+        face_indices = np.array([
+            [1, 2, 3, 5, 9, 8],
+            [0, 2, 3, 6, 9, 7],
+            [0, 1, 3, 4, 8, 7],
+            [0, 1, 2, 4, 5, 6]
+        ])
+        nodes_per_face = 6
+    elif cells_lin is not None and len(cells_lin) > 0:
+        cells = cells_lin
+        face_indices = np.array([[1, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]])
+        nodes_per_face = 3
+    else:
+        raise ValueError("Input mesh has no tetrahedral or quadratic tetrahedral cells.")
+
+    n_tets = len(cells)
+    faces = cells[:, face_indices].reshape(-1, nodes_per_face)
     parents = np.repeat(np.arange(n_tets), 4)
-    canonical = np.sort(faces, axis=1)
+    
+    # Extract just the 3 corner nodes to sort and match. 
+    # This ensures exact matching without relying on mid-node permutations.
+    corners = faces[:, :3]
+    canonical = np.sort(corners, axis=1)
 
     order = np.lexsort(canonical.T[::-1])
     canonical = canonical[order]
@@ -127,18 +145,6 @@ def _tet_face_topology(mesh):
         "interface_parents_a": parents[pair_idx],
         "interface_parents_b": parents[pair_idx + 1],
     }
-
-
-def _build_facet_polydata(mesh, faces, scalars):
-    n = len(faces)
-    if n == 0:
-        cells = np.empty(0, dtype=np.int64)
-    else:
-        cells = np.column_stack([np.full(n, 3, dtype=np.int64), faces]).ravel()
-    poly = pv.PolyData(np.asarray(mesh.points), faces=cells)
-    for name, arr in scalars.items():
-        poly.cell_data[name] = np.asarray(arr)
-    return poly
 
 
 def mark_interface_facets(mesh, label_array="marker", encoding_base=1000):
@@ -177,6 +183,41 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000):
         {"interface_id": interface_id, "region_a": lo, "region_b": hi},
     )
 
+def _build_facet_polydata(mesh, faces, scalars):
+    """
+    Builds a surface mesh containing the extracted interface facets.
+    Dynamically creates a PolyData for linear faces (3 nodes) or an 
+    UnstructuredGrid for quadratic faces (6 nodes).
+    """
+    n = len(faces)
+    points = np.asarray(mesh.points)
+
+    if n == 0:
+        grid = pv.PolyData()
+        grid.points = points
+    else:
+        nodes_per_face = faces.shape[1]
+        
+        # VTK connectivity format: [n_nodes, p0, p1..., n_nodes, p0, p1...]
+        cells = np.column_stack([np.full(n, nodes_per_face, dtype=np.int64), faces]).ravel()
+
+        if nodes_per_face == 3:
+            # Linear triangles are perfectly handled by PolyData
+            grid = pv.PolyData(points, faces=cells)
+            
+        elif nodes_per_face == 6:
+            # Quadratic triangles MUST be an UnstructuredGrid
+            cell_types = np.full(n, pv.CellType.QUADRATIC_TRIANGLE, dtype=np.uint8)
+            grid = pv.UnstructuredGrid(cells, cell_types, points)
+            
+        else:
+            raise ValueError(f"Expected 3 or 6 nodes per face, got {nodes_per_face}.")
+
+    # Attach the scalar data (interface IDs, markers, etc.)
+    for name, arr in scalars.items():
+        grid.cell_data[name] = np.asarray(arr)
+
+    return grid
 
 def mark_boundary_facets(mesh, label_array="marker"):
     """
