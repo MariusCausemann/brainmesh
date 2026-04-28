@@ -37,7 +37,9 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
         build_inferior_lateral_ventricle_horns,
         enforce_connected_ventricles,
         enforce_min_thickness,
-        enforce_tight_ventricles
+        enforce_tight_ventricles,
+        coarsen_surface,
+        straighten_spinal_interface
     )
 
     out_dir = pathlib.Path(out_dir)
@@ -86,7 +88,11 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     grid.save(out_dir / "seg.vti")
 
     surf = grid.contour_labels("all", smoothing=True)
+    surf = straighten_spinal_interface(surf, grid)
     surf.save(out_dir / "surf.vtk")
+
+    surf_dec = coarsen_surface(surf, decimation_ratio=0.9)
+    surf_dec.save(out_dir / "surf_dec.vtk")
     return surf
 
 
