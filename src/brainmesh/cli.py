@@ -47,6 +47,46 @@ def mesh_main(argv=None):
         quiet=args.quiet,
     )
 
+def curve_mesh_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Convert linear tetrahedra to quadratic and snap boundaries to a target surface."
+    )
+    parser.add_argument("-i", "--input", type=str, required=True,
+                        help="Path to input linear tetrahedral mesh (.vtk, .vtu, ...)")
+    parser.add_argument("-t", "--target", type=str, required=True,
+                        help="Path to target high-res surface mesh (.vtk, .stl, .ply, .obj, ...)")
+    parser.add_argument("-o", "--output", type=str, default="snapped_output.vtk",
+                        help="Path to save the output mesh (default: snapped_output.vtk)")
+    parser.add_argument("--min-quality-factor", type=float, default=0.8,
+                        help="Minimum allowed quality as a fraction of the original mesh's"
+                             " minimum quality (default: 0.8)")
+    args = parser.parse_args(argv)
+
+    import pyvista as pv
+    from brainmesh.curved_mesh import (
+        adaptive_snap_boundaries,
+        convert_to_quadratic,
+        print_quality_stats,
+    )
+
+    input_mesh = pv.read(args.input)
+    target_surface = pv.read(args.target)
+
+    print_quality_stats(input_mesh, "1. Original Linear Mesh")
+
+    print("Converting to 2nd-order quadratic tetrahedra...")
+    quad_mesh = convert_to_quadratic(input_mesh)
+    orig_q = print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
+
+    print("Snapping boundary nodes to target surface...")
+    adaptive_snap_boundaries(quad_mesh, target_surface,
+                              min_quality=orig_q.min() * args.min_quality_factor)
+    print_quality_stats(quad_mesh, "3. Snapped Quadratic Mesh")
+
+    quad_mesh.save(args.output)
+    print(f"Success! Snapped mesh saved to: {args.output}")
+
+
 def subdivide_SAS(argv=None):
     parser = argparse.ArgumentParser(
         description="Subdivide the SAS by the nearest cortical parcellation label"

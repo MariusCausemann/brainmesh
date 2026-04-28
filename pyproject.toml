@@ -32,6 +32,7 @@ homepage = "https://github.com/MariusCausemann/brainmesh"
 brainmesh-surface = "brainmesh.cli:surface_main"
 brainmesh-mesh = "brainmesh.cli:mesh_main"
 brainmesh-subdivideSAS = "brainmesh.cli:subdivide_SAS"
+brainmesh-curve-mesh = "brainmesh.cli:curve_mesh_main"
 
 
 [project.optional-dependencies]
