@@ -35,6 +35,8 @@ brainmesh-subdivideSAS = "brainmesh.cli:subdivide_SAS"
 brainmesh-curve-mesh = "brainmesh.cli:curve_mesh_main"
 brainmesh-mark-facets = "brainmesh.cli:mark_facets_main"
 brainmesh-remark-sas = "brainmesh.cli:remark_sas_main"
+brainmesh-extract-csf = "brainmesh.cli:extract_csf_main"
+brainmesh-group-regions = "brainmesh.cli:group_regions_main"
 
 
 [project.optional-dependencies]

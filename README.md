@@ -41,6 +41,10 @@ brainmesh-curve-mesh -i results/mesh_marked.vtk -t results/surf.vtk -o results/m
 
 # Extract and combine interface and boundary facets into a single mesh
 brainmesh-mark-facets results/mesh_marked_sas.vtk -o results/facets.vtk
+
+# Extract the CSF compartment as a submesh together with its facets
+# (facets are computed on the full mesh so CSF-tissue interfaces are preserved)
+brainmesh-extract-csf results/mesh_marked_sas.vtk -o results/csf_mesh.vtk --facets results/csf_facets.vtk
 ```
 
 `brainmesh-remark-sas` accepts the following options:
@@ -75,6 +79,19 @@ The output carries a single `interface_id` cell array using the following scheme
 | `2–77` | FreeSurfer aseg anatomy (unchanged) |
 | `11001–11035` | LH SAS parcels — decode: `fs_aparc = marker - 10000` |
 | `12001–12035` | RH SAS parcels — decode: `fs_aparc = marker - 10000` |
+
+`brainmesh-extract-csf` accepts the following options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `mesh` | *(required)* | Marked tetrahedral mesh (`.vtk`, `.vtu`, …) |
+| `-o` / `--output` | `csf_mesh.vtk` | Output path for the CSF submesh |
+| `--facets` | `csf_facets.vtk` | Output path for the CSF facet mesh |
+| `--label-array` | `marker` | Cell data array used for region markers |
+| `--max-angle` | `10.0` | Max angle (degrees) from downward for spinal boundary detection |
+| `--max-distance` | `0.5` | Max z-distance from the lowest boundary face for spinal detection (mesh units) |
+
+The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, but is restricted to facets bounding the CSF compartment — including CSF-to-tissue interfaces with their full encoding (e.g. `min(CSF,WM)*100000+max(CSF,WM)`).
 
 `brainmesh-curve-mesh` accepts the following options:
 

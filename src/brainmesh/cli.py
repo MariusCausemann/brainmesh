@@ -100,6 +100,10 @@ def mark_facets_main(argv=None):
                         help="Max angle (degrees) from downward for spinal boundary detection (default: 10)")
     parser.add_argument("--max-distance", type=float, default=0.5,
                         help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
+    parser.add_argument("--no-smooth-sas-labels", action="store_true",
+                        help="Disable majority-vote smoothing of SAS boundary labels")
+    parser.add_argument("--keep-sas-interfaces", action="store_true",
+                        help="Keep interfaces between SAS subdivision regions (dropped by default)")
     args = parser.parse_args(argv)
 
     import pyvista as pv
@@ -107,7 +111,9 @@ def mark_facets_main(argv=None):
 
     mesh = pv.read(args.mesh)
     combined = mark_facets(mesh, label_array=args.label_array,
-                           max_angle=args.max_angle, max_distance=args.max_distance)
+                           max_angle=args.max_angle, max_distance=args.max_distance,
+                           smooth_sas_labels=not args.no_smooth_sas_labels,
+                           ignore_sas_interfaces=not args.keep_sas_interfaces)
     combined.save(args.output)
     import numpy as np
     from brainmesh.labels import SPINAL_ID
@@ -141,6 +147,81 @@ def remark_sas_main(argv=None):
     n_csf = (markers == Label.CSF).sum()
     n_sas = np.sum((markers > 0) & (markers != Label.CSF))
     print(f"Saved {args.output}: {n_sas} SAS-subdivided + {n_csf} unmarked CSF tets")
+
+
+def extract_csf_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Extract the CSF compartment (SAS + ventricles) and its facets from a marked tet mesh."
+    )
+    parser.add_argument("mesh", help="Marked tetrahedral mesh (.vtk, .vtu, ...)")
+    parser.add_argument("-o", "--output", default="csf_mesh.vtk",
+                        help="Output path for the CSF submesh (default: csf_mesh.vtk)")
+    parser.add_argument("--facets", default="csf_facets.vtk",
+                        help="Output path for the CSF facet mesh (default: csf_facets.vtk)")
+    parser.add_argument("--label-array", default="marker",
+                        help="Cell data array used for region markers (default: marker)")
+    parser.add_argument("--max-angle", type=float, default=10.0,
+                        help="Max angle (degrees) from downward for spinal boundary detection (default: 10)")
+    parser.add_argument("--max-distance", type=float, default=0.5,
+                        help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
+    parser.add_argument("--no-smooth-sas-labels", action="store_true",
+                        help="Disable majority-vote smoothing of SAS boundary labels")
+    parser.add_argument("--keep-sas-interfaces", action="store_true",
+                        help="Keep interfaces between SAS subdivision regions (dropped by default)")
+    args = parser.parse_args(argv)
+
+    import numpy as np
+    import pyvista as pv
+    from brainmesh.labels import SPINAL_ID
+    from brainmesh.mesh import extract_csf
+
+    mesh = pv.read(args.mesh)
+    csf_mesh, facets = extract_csf(
+        mesh,
+        label_array=args.label_array,
+        return_facets=True,
+        max_angle=args.max_angle,
+        max_distance=args.max_distance,
+        smooth_sas_labels=not args.no_smooth_sas_labels,
+        ignore_sas_interfaces=not args.keep_sas_interfaces,
+    )
+    csf_mesh.save(args.output)
+    facets.save(args.facets)
+
+    ids = facets.cell_data["interface_id"]
+    print(f"CSF mesh: {csf_mesh.n_cells} tets → {args.output}")
+    print(f"Facets:   {(ids >= 100000).sum()} interface + "
+          f"{((ids > 0) & (ids < 100000) & (ids != SPINAL_ID)).sum()} boundary + "
+          f"{(ids == SPINAL_ID).sum()} spinal → {args.facets}")
+
+
+def group_regions_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Group CSF facets into anatomical regions (lobes, tentorium, sagittal sinus, …)."
+    )
+    parser.add_argument("mesh", help="Marked facet mesh (.vtk, .vtu, ...)")
+    parser.add_argument("-o", "--output", default="csf_facets_regions.vtk",
+                        help="Output path (default: csf_facets_regions.vtk)")
+    parser.add_argument("--label-array", default="marker",
+                        help="Cell data array used for region markers (default: marker)")
+    parser.add_argument("--no-smooth-sas-labels", action="store_true",
+                        help="Disable majority-vote smoothing of SAS boundary labels")
+    args = parser.parse_args(argv)
+
+    import pyvista as pv
+    from brainmesh.mesh import CSF_REGION_NAMES, group_csf_facets_by_region
+
+    facets = pv.read(args.mesh)
+    result = group_csf_facets_by_region(facets)
+    result.save(args.output)
+
+    import numpy as np
+    counts = dict(zip(*np.unique(result.cell_data["region"], return_counts=True)))
+    for rid, name in enumerate(CSF_REGION_NAMES):
+        n = counts.get(rid, 0)
+        if n:
+            print(f"  {name:30s} ({rid}) {n:6d}")
+    print(f"Saved → {args.output}")
 
 
 def subdivide_SAS(argv=None):

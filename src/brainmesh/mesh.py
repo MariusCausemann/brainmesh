@@ -48,6 +48,55 @@ def mark_mesh(mesh, surf):
     mesh = mesh.extract_cells(marker > 0)
     return mesh
 
+def smooth_cell_labels(surf, marker_name, target_labels, max_iter=20):
+    """
+    Smooths cell labels by enforcing that no triangle shares more than 
+    one edge with a different region, acting ONLY on the specified labels.
+    """
+    mesh = surf.copy()
+    labels = mesh.cell_data[marker_name].copy()
+    n_cells = mesh.n_cells
+    
+    # Convert to set for O(1) lookup speed inside the loop
+    target_set = set(target_labels)
+    
+    # Pre-compute the edge neighbors
+    neighbors_list = [mesh.cell_neighbors(i, 'edges') for i in range(n_cells)]
+    
+    for iteration in range(max_iter):
+        flipped = 0
+        
+        for i in range(n_cells):
+            current_label = labels[i]
+            
+            # Constraint 1: Skip if the current cell isn't a target label
+            if current_label not in target_set:
+                continue
+                
+            neighbor_ids = neighbors_list[i]
+            if len(neighbor_ids) == 0:
+                continue 
+                
+            neighbor_labels = labels[neighbor_ids]
+            unique_vals, counts = np.unique(neighbor_labels, return_counts=True)
+            majority_label = unique_vals[np.argmax(counts)]
+            max_count = np.max(counts)
+            
+            # Constraint 2: Only allow flipping TO another target label
+            if majority_label not in target_set:
+                continue
+            
+            # The Magic Rule
+            if majority_label != current_label and max_count >= 2:
+                labels[i] = majority_label
+                flipped += 1
+                
+        if flipped == 0:
+            print(f"Selective smoothing converged in {iteration + 1} iterations.")
+            break
+            
+    mesh.cell_data[marker_name] = labels
+    return mesh
 
 def remark_csf_with_sas(mesh, sas_img, csf_label=Label.CSF, label_array="marker"):
     """
@@ -69,7 +118,6 @@ def remark_csf_with_sas(mesh, sas_img, csf_label=Label.CSF, label_array="marker"
     kd_tree = KDTree(sas.cell_centers().points)
     mesh_cell_centers = mesh.cell_centers().points.astype(np.float32)
     _, nearest_idx = kd_tree.query(mesh_cell_centers)
-    # Raw FS parcellation labels from the NIfTI; offset to brainmesh SAS marker range
     sas_marker = sas.cell_data["data"].astype(np.int32)
     mesh_marker = mesh.cell_data[label_array].copy()
     csf_mask = mesh_marker == csf_label
@@ -102,13 +150,198 @@ def filter_by_label(mesh, labels, label_array="marker"):
     return mesh.extract_cells(mask)
 
 
-def extract_csf(mesh, label_array="marker"):
+def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs):
     """
-    Extract the CSF compartment — CSF plus all ventricles and choroid
-    plexus (i.e. ``Label.CSF`` plus ``VENTRICLE_LABELS``).
+    Extract the CSF compartment — ``Label.CSF``, all ventricles and choroid plexus,
+    and any SAS-subdivision markers (values > ``SAS_LABEL_OFFSET``).
+
+    When ``return_facets=True``, facets are computed on the **full** mesh so that
+    CSF-to-tissue interfaces carry their full ``interface_id`` encoding
+    (e.g. ``min(CSF,WM)*100000+max(CSF,WM)``).  The returned facet mesh shares
+    the CSF submesh's point array.
+
+    Parameters
+    ----------
+    mesh          : pv.UnstructuredGrid  marked tetrahedral mesh
+    label_array   : str                  cell data array with region markers
+    return_facets : bool                 if True, also return the CSF-relevant
+                                         facets (same ``interface_id`` scheme as
+                                         :func:`mark_facets`)
+    **facet_kwargs                       forwarded to :func:`mark_facets`
+                                         (e.g. ``max_angle``, ``max_distance``,
+                                         ``encoding_base``)
+
+    Returns
+    -------
+    csf_mesh : pv.UnstructuredGrid
+    facets   : pv.PolyData or pv.UnstructuredGrid  (only when return_facets=True)
     """
-    csf_labels = list(VENTRICLE_LABELS) + [Label.CSF]
-    return filter_by_label(mesh, csf_labels, label_array=label_array)
+    all_markers = np.asarray(mesh.cell_data[label_array])
+    sas_labels = np.unique(all_markers[all_markers > SAS_LABEL_OFFSET]).tolist()
+    csf_labels = list(VENTRICLE_LABELS) + [Label.CSF] + sas_labels
+    csf_mesh = filter_by_label(mesh, csf_labels, label_array=label_array)
+
+    if not return_facets:
+        return csf_mesh
+
+    # Compute facets on the full mesh (preserves CSF-to-tissue interface IDs),
+    # then keep facets whose interface_id involves a CSF marker. Operates purely
+    # on cell data, so this works for both linear and quadratic tet meshes.
+    full_facets = mark_facets(mesh, label_array=label_array, **facet_kwargs)
+    encoding_base = facet_kwargs.get("encoding_base", 100000)
+    ids = np.asarray(full_facets.cell_data["interface_id"])
+    a, b = np.divmod(ids, encoding_base)  # boundary: a=0, b=id; interface: (min,max)
+    csf_arr = np.asarray(csf_labels)
+    mask = np.isin(a, csf_arr) | np.isin(b, csf_arr) | (ids == SPINAL_ID)
+    csf_facets = full_facets.extract_cells(mask)
+    return csf_mesh, csf_facets
+
+
+def mark_between_regions(ids_a, ids_b, da, db, seg, label_array):
+    from scipy.spatial import KDTree
+    sega = seg.extract_cells(np.isin(seg.cell_data[label_array], ids_a))
+    segb = seg.extract_cells(np.isin(seg.cell_data[label_array], ids_b))
+    kd_tree_a = KDTree(sega.cell_centers().points)
+    kd_tree_b = KDTree(segb.cell_centers().points)
+    dista, _ = kd_tree_a.query(seg.cell_centers().points)
+    distb, _ = kd_tree_b.query(seg.cell_centers().points)
+    return np.logical_and(dista < da, distb < db)
+
+def dilate_cell_marker(grid, marker, r=1):
+    dil_marker = marker.copy()
+    for _ in range(r):
+        dil_marker = dilate_cell_marker_once(grid, dil_marker)
+    return dil_marker
+
+def dilate_cell_marker_once(grid, marker):
+    all_cell_centers = grid.cell_centers().points
+    dil_marker = marker.copy()
+    for i in np.nonzero(marker==0)[0]:
+        neighbor_indices = grid.cell_neighbors(i,connections="points")
+        neighbor_indices = [j for j in neighbor_indices if marker[j] > 0]
+        if len(neighbor_indices)==0: continue
+        neighbor_markers = marker[neighbor_indices]
+        neighbor_centers = all_cell_centers[neighbor_indices]
+        neighbor_dist = np.linalg.norm(all_cell_centers[i] - neighbor_centers, axis=1)
+        # possibly weight by distance?
+        counts = np.bincount(neighbor_markers, weights=1/neighbor_dist)
+        dil_marker[i] = np.argmax(counts)
+    return dil_marker
+
+def erode_cell_marker(grid, marker, r=1):
+    eroded_marker = marker.copy()
+    for _ in range(r):
+        new_marker = eroded_marker.copy()
+        for i in range(grid.n_cells):
+            neighbor_indices = grid.cell_neighbors(i, connections="points")
+            if (eroded_marker[i] != eroded_marker[neighbor_indices]).any(): 
+                new_marker[i] = 0
+        eroded_marker = new_marker
+    return eroded_marker
+
+def remove_small_patches(grid, facet_marker, threshold, target_labels=None):
+    new_marker = facet_marker.copy()
+    if target_labels is None: target_labels = np.unique(facet_marker)
+    for fm in target_labels:
+        patch = grid.extract_cells(facet_marker==fm).connectivity()
+        regionids, counts  = np.unique(patch["RegionId"], return_counts=True)
+        for ri, c in zip(regionids, counts):
+            if c < threshold: 
+                new_marker[np.flatnonzero(facet_marker==fm)[patch["RegionId"]==ri]] = 0
+    return new_marker
+
+
+
+CSF_REGION_NAMES = []
+
+def group_csf_facets_by_region(facets, encoding_base=100000):
+    """
+    Assign each CSF facet (from :func:`extract_csf`) to a named anatomical region.
+
+    Decodes the ``interface_id`` cell array and maps each facet to one of the
+    regions in :data:`CSF_REGION_NAMES`.  Adds a ``region`` (int32) cell array
+    to a copy of ``facets``.  Every facet receives a non-zero region label.
+
+    Region IDs and names
+    --------------------
+
+    Parameters
+    ----------
+    facets           : pv mesh with ``interface_id`` cell array
+    encoding_base    : int    encoding base used in ``interface_id`` (default 100000)
+    Returns
+    -------
+    pv mesh  copy of ``facets`` with added ``region`` (int32) cell array
+    """
+    from .labels import region_dict, _sas_lh, _sas_rh
+    ids = np.asarray(facets.cell_data["interface_id"], dtype=np.int64)
+    a, b = np.divmod(ids, encoding_base)
+
+    region = np.zeros(len(ids), dtype=np.int32)
+
+    def _assign(mask, rid):
+        region[mask & (region == 0)] = rid
+
+    tent = int(Label.TENTORIUM)  # 71
+    sas_labels = np.unique(ids[ids > SAS_LABEL_OFFSET]).tolist()
+    csf_labels = VENTRICLE_LABELS + [Label.CSF] + sas_labels
+
+    remove_id = int(-1)
+    # remove all interfaces between different CSF regions
+    _assign(np.logical_and(np.isin(a, csf_labels),
+                           np.isin(b, csf_labels)), remove_id)
+
+    # 1. Spinal canal
+    _assign(ids == SPINAL_ID, 1)
+
+    # mark lateral ventricle surface
+    LVs = list(set(VENTRICLE_LABELS) - set((Label.THIRD_VENTRICLE,
+                                            Label.FOURTH_VENTRICLE)))
+    _assign(np.logical_xor(np.isin(a, LVs), np.isin(b, LVs)), 2)
+
+    # mark FALX
+    _assign((a==Label.FALX) + (b==Label.FALX), 4)
+
+    # mark up and downward facing parts of tentorium
+    _assign((a==tent) + (b==tent), 5)
+    infra_tent_ids = list(region_dict["_SAS_INFRATENTORIAL"])
+    region[np.logical_and(a==tent, np.isin(b, infra_tent_ids))] = 6
+    region[np.logical_and(b==tent, np.isin(a, infra_tent_ids))] = 6
+
+    # all remaining internal -> tissue
+    _assign(ids >= encoding_base, 3)
+
+    # mark specified regions:
+    for i, (k, v) in enumerate(region_dict.items()):
+        print(k, v)
+        _assign(np.isin(ids, list(v)), 10 + i)
+
+    # mark sagittal sinus
+    # find right and left SAS labels
+    rs_sas_labels = np.unique(ids[(ids > SAS_LABEL_OFFSET + 2000) & 
+                                  (ids < SAS_LABEL_OFFSET + 3000)]).tolist()
+    ls_sas_labels = np.unique(ids[(ids > SAS_LABEL_OFFSET + 1000) & 
+                                  (ids < SAS_LABEL_OFFSET + 2000)]).tolist()
+
+    # and find all facets that are within 10mm of both
+    PSD = mark_between_regions(rs_sas_labels, ls_sas_labels, 10, 10, 
+                               facets, "interface_id")
+
+    # finally mark the front and back, depending on the SAS label IDs
+    anterior_PSD = [1017,1022,1024, 1028]
+    posterior_PSD = [1025, 1029, 1005, 1011, 1013]
+    region[np.logical_and(PSD, np.isin(ids, _sas_rh(anterior_PSD) + _sas_lh(anterior_PSD)))] = 8
+    region[np.logical_and(PSD, np.isin(ids, _sas_rh(posterior_PSD) + _sas_lh(posterior_PSD)))] = 9
+    
+    sas_regions = np.unique(region[region >= 10]).tolist()
+    out = facets.copy()
+    region = remove_small_patches(out, region, threshold=50, target_labels=sas_regions)
+    region = dilate_cell_marker(out, region, 10)
+    out.cell_data["region"] = region
+    out = smooth_cell_labels(out, marker_name="region", target_labels=sas_regions + [8,9])
+    out = out.extract_cells(out.cell_data["region"] >= 0)
+    assert (region==0).sum() == 0
+    return out
 
 
 def _tet_face_topology(mesh):
@@ -177,7 +410,8 @@ def _tet_face_topology(mesh):
     }
 
 
-def mark_interface_facets(mesh, label_array="marker", encoding_base=1000):
+def mark_interface_facets(mesh, label_array="marker", encoding_base=1000,
+                          ignore_sas_interfaces=True):
     """
     Build a facet mesh of the interfaces between regions with different
     markers in the input tet mesh.
@@ -190,6 +424,13 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000):
     The resulting :class:`pyvista.PolyData` shares the parent's point
     array, so vertex indices line up with the parent tet mesh — ready to
     use as a FEniCS facet function.
+
+    Parameters
+    ----------
+    ignore_sas_interfaces : bool
+        If True (default), drop interfaces where *both* adjacent markers are
+        SAS subdivision labels (> ``SAS_LABEL_OFFSET``).  These intra-SAS
+        boundaries are rarely needed and can be re-enabled by passing False.
     """
     topo = _tet_face_topology(mesh)
     markers = np.asarray(mesh.cell_data[label_array])
@@ -205,6 +446,11 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000):
 
     lo = np.minimum(m_a, m_b).astype(np.int64)
     hi = np.maximum(m_a, m_b).astype(np.int64)
+
+    if ignore_sas_interfaces:
+        keep = lo <= SAS_LABEL_OFFSET
+        faces, lo, hi = faces[keep], lo[keep], hi[keep]
+
     interface_id = lo * encoding_base + hi
 
     return _build_facet_polydata(
@@ -302,7 +548,7 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     normals[inward] *= -1
 
     # Criterion 1: parent tet is a CSF cell.
-    csf_mask = np.isin(boundary, csf_labels) + (boundary > 10000)
+    csf_mask = np.isin(boundary, csf_labels) + (boundary > SAS_LABEL_OFFSET)
 
     # Criterion 2: outward normal within max_angle of (0, 0, -1).
     cos_thresh = np.cos(np.deg2rad(max_angle))
@@ -336,7 +582,8 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
 
 
 def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
-                encoding_base=100000):
+                encoding_base=100000, smooth_sas_labels=False,
+                ignore_sas_interfaces=True):
     """
     Build a combined facet mesh containing all interface, boundary, and spinal facets.
 
@@ -352,23 +599,33 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
 
     Parameters
     ----------
-    mesh          : pv.UnstructuredGrid  marked tetrahedral mesh
-    label_array   : str                  cell data array with region markers
-    max_angle     : float                maximum deviation (degrees) from straight down
-                                         for spinal boundary detection
-    max_distance  : float                maximum z-distance from the lowest boundary
-                                         face centroid for spinal boundary detection
-                                         (in mesh units)
-    encoding_base : int                  multiplier for the interface ID encoding;
-                                         must exceed the maximum label value
-                                         (default 100000, handles SAS markers ≤ ~12035)
+    mesh                  : pv.UnstructuredGrid  marked tetrahedral mesh
+    label_array           : str                  cell data array with region markers
+    max_angle             : float                maximum deviation (degrees) from straight down
+                                                 for spinal boundary detection
+    max_distance          : float                maximum z-distance from the lowest boundary
+                                                 face centroid for spinal boundary detection
+                                                 (in mesh units)
+    encoding_base         : int                  multiplier for the interface ID encoding;
+                                                 must exceed the maximum label value
+                                                 (default 100000, handles SAS markers ≤ ~12035)
+    smooth_sas_labels     : bool                 if True (default), apply majority-vote smoothing
+                                                 to SAS boundary labels after extraction
+    ignore_sas_interfaces : bool                 if True (default), drop interfaces where both
+                                                 adjacent markers are SAS subdivision labels
+                                                 (> ``SAS_LABEL_OFFSET``)
 
     Returns a :class:`pyvista.PolyData` or :class:`pyvista.UnstructuredGrid` that
     shares the parent's point array, with an ``interface_id`` cell data array.
     """
     interfaces = mark_interface_facets(mesh, label_array=label_array,
-                                       encoding_base=encoding_base)
+                                       encoding_base=encoding_base,
+                                       ignore_sas_interfaces=ignore_sas_interfaces)
     boundaries = mark_boundary_facets(mesh, label_array=label_array)
+    if smooth_sas_labels:
+        bnd = boundaries["boundary"]
+        sas_labels = np.unique(bnd[bnd > SAS_LABEL_OFFSET]).tolist()
+        boundaries = smooth_cell_labels(boundaries, marker_name="boundary", target_labels=sas_labels)
     spinal     = mark_spinal_boundary(mesh, label_array=label_array,
                                       max_angle=max_angle, max_distance=max_distance)
 
