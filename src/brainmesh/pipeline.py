@@ -7,7 +7,7 @@ import numpy as np
 import pyvista as pv
 
 
-def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
+def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *, numba_threads=8):
     """
     Run the full segmentation-cleanup and surface-extraction pipeline.
 
@@ -18,8 +18,9 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     Parameters
     ----------
     seg_path : str or Path
-    out_dir  : str or Path  destination folder for results
-    numba_threads : int     thread count passed to numba
+    out_seg  : str or Path, optional  destination file for the cleaned segmentation
+    out_surf : str or Path, optional  destination file for the extracted surface
+    numba_threads : int               thread count passed to numba
     """
     import numba
     numba.set_num_threads(numba_threads)
@@ -42,12 +43,8 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
         straighten_spinal_interface
     )
 
-    out_dir = pathlib.Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
-
     data = solidify_csf(data)
     data = close_csf_space(data, radius=3, iter=1)
     data = fill_wm_hyperintensities(data)
@@ -55,11 +52,11 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     data = extend_brainstem(data)
     data = enforce_csf_layer(data, thickness=1)
 
+
     orig_mask = nbm.smooth_labels_spherical(data > 0, radius=1)
     data = nbm.mode_box(data)
     data = create_falx(data, hemisphere_distance=6)
     data = create_tentorium(data, distance=3)
-
     # connect (often disconnected) inf. lateral ventricle horns with 
     # lateral ventricles
     data = build_inferior_lateral_ventricle_horns(data, radius=3)
@@ -81,22 +78,40 @@ def segmentation_to_surface(seg_path, out_dir="results", *, numba_threads=8):
     data = extend_brainstem_caudally(data, offset=18)
 
     seg_out = nib.Nifti1Image(data, seg.affine)
-    nib.save(seg_out, out_dir / "seg.nii.gz")
-
+    
+    # We still need the grid for surface extraction
     grid = nibabel_to_pyvista(seg_out)
     grid["data"] = data.flatten(order="F")
-    grid.save(out_dir / "seg.vti")
 
+    # Only save segmentation outputs if requested
+    if out_seg is not None:
+        out_seg_path = pathlib.Path(out_seg)
+        out_seg_path.parent.mkdir(parents=True, exist_ok=True)
+        nib.save(seg_out, out_seg_path)
+        
+        # Dynamically extract base name (handling .nii.gz double extensions safely)
+        seg_basename = out_seg_path.name.split('.')[0]
+        out_vti_path = out_seg_path.parent / f"{seg_basename}.vti"
+        grid.save(out_vti_path)
+
+    # Extract surface
     surf = grid.contour_labels("all", smoothing=True)
     surf = straighten_spinal_interface(surf, grid)
-    surf.save(out_dir / "surf.vtk")
 
-    surf_dec = coarsen_surface(surf, decimation_ratio=0.9)
-    surf_dec.save(out_dir / "surf_dec.vtk")
+    # Only save surface outputs if requested
+    if out_surf is not None:
+        out_surf_path = pathlib.Path(out_surf)
+        out_surf_path.parent.mkdir(parents=True, exist_ok=True)
+        surf.save(out_surf_path)
+
+        # Save the decimated surface, appending '_dec' to the provided surface filename
+        surf_dec = coarsen_surface(surf, decimation_ratio=0.9)
+        out_surf_dec_path = out_surf_path.parent / f"{out_surf_path.stem}_dec{out_surf_path.suffix}"
+        surf_dec.save(out_surf_dec_path)
+    
     return surf
 
-
-def surface_to_mesh(surf_path, out_dir="results", **tetwild_kwargs):
+def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
     """
     Tetrahedralise a surface and mark each cell with its anatomical label.
 
@@ -110,9 +125,6 @@ def surface_to_mesh(surf_path, out_dir="results", **tetwild_kwargs):
 
     from brainmesh import mark_mesh
 
-    out_dir = pathlib.Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     surf = pv.read(surf_path)
 
     twild_defaults = dict(
@@ -123,13 +135,16 @@ def surface_to_mesh(surf_path, out_dir="results", **tetwild_kwargs):
         edge_length_fac=0.05,
         epsilon=1e-3,
         coarsen=False,
+        num_threads=8
     )
     twild_defaults.update(tetwild_kwargs)
 
     mesh = pytetwild.tetrahedralize_pv(surf, **twild_defaults)
-    mesh.save(out_dir / "mesh.vtk")
     mesh = mark_mesh(mesh, surf)
-    mesh.save(out_dir / "mesh_marked.vtk")
+    out_dir = pathlib.Path(out_file).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    mesh.save(out_file)
     return mesh
 
 

@@ -7,23 +7,31 @@ def surface_main(argv=None):
         description="Clean up a brain segmentation and extract a multi-boundary surface mesh."
     )
     parser.add_argument("seg", help="Input segmentation (.nii.gz)")
-    parser.add_argument("-o", "--out-dir", default="results",
-                        help="Output directory (default: results)")
+    
+    parser.add_argument("--out-seg", default="results/seg.nii.gz",
+                        help="Output path for the cleaned segmentation (default: results/seg.nii.gz)")
+    parser.add_argument("--out-surf", default="results/surf.vtk",
+                        help="Output path for the extracted surface (default: results/surf.vtk)")
+    
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of numba threads (default: 8)")
     args = parser.parse_args(argv)
 
     from brainmesh.pipeline import segmentation_to_surface
-    segmentation_to_surface(args.seg, out_dir=args.out_dir, numba_threads=args.threads)
-
+    segmentation_to_surface(
+        args.seg, 
+        out_seg=args.out_seg, 
+        out_surf=args.out_surf, 
+        numba_threads=args.threads
+    )
 
 def mesh_main(argv=None):
     parser = argparse.ArgumentParser(
         description="Tetrahedralise a surface mesh and mark cells with anatomical labels."
     )
     parser.add_argument("surf", help="Input surface mesh (.vtk) with boundary_labels")
-    parser.add_argument("-o", "--out-dir", default="results",
-                        help="Output directory (default: results)")
+    parser.add_argument("-o", "--out-file", 
+                        help="Output mesh file")
     parser.add_argument("--edge-length-fac", type=float, default=0.05,
                         help="Target edge length as fraction of bbox diagonal (default: 0.05)")
     parser.add_argument("--stop-energy", type=float, default=10.0,
@@ -39,7 +47,7 @@ def mesh_main(argv=None):
     from brainmesh.pipeline import surface_to_mesh
     surface_to_mesh(
         args.surf,
-        out_dir=args.out_dir,
+        out_file=args.out_file,
         edge_length_fac=args.edge_length_fac,
         stop_energy=args.stop_energy,
         epsilon=args.epsilon,
