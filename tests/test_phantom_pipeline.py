@@ -18,7 +18,7 @@ def test_phantom_pipeline_end_to_end(tmp_path):
     seg_path = tmp_path / "phantom_seg.nii.gz"
     nib.save(make_phantom_seg(shape=(360, 360, 360), spacing=0.5, scale=2.0), seg_path)
 
-    surf = segmentation_to_surface(seg_path, out_dir=tmp_path, numba_threads=4)
+    surf = segmentation_to_surface(seg_path, out_surf=tmp_path / "surf.vtk", numba_threads=4)
     assert surf.n_cells > 0
     assert "boundary_labels" in surf.cell_data
     region_labels = set(np.unique(surf["boundary_labels"]).tolist())
@@ -28,7 +28,7 @@ def test_phantom_pipeline_end_to_end(tmp_path):
 
     mesh = surface_to_mesh(
         tmp_path / "surf.vtk",
-        out_dir=tmp_path,
+        out_file= tmp_path / "mesh.vtk",
         edge_length_fac=0.08,
         quiet=True,
     )
