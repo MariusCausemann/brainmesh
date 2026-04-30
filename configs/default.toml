@@ -1,0 +1,167 @@
+# brainmesh segmentation pipeline — reference configuration.
+# All values reproduce the current hardcoded defaults. Copy this file,
+# edit the values that need to change for your subject, and pass it via
+#     brainmesh-surface <seg.nii.gz> --config <your-config.toml>
+# Sections may be omitted or partially specified — missing keys fall back
+# to these defaults.
+#
+# Units: every *_radius / *_gap / *_offset / *_thickness is in voxels.
+#        sigmas are in voxels (gaussian filter sigma).
+
+# --- Initial CSF cleanup -----------------------------------------------------
+
+[solidify_csf]
+# Spherical closing applied to the brain mask to seal small pinholes
+# before extracting the missing-CSF region.
+mask_closing_radius     = 5
+mask_closing_iterations = 1
+
+[close_csf_space]
+# Larger closing of the whole foreground; fills CSF into any gap that
+# the closing operation seals.
+radius                = 3
+iter                  = 1
+brainstem_area_radius = 0   # > 0 restricts CSF filling to the brainstem neighbourhood
+
+[fill_wm_hyperintensities]
+# Replace WM_HYPOINTENSITIES voxels with the dominant nearby WM label
+# found within this many voxels.
+wm_search_radius = 6
+
+[cut_bottom]
+# Remove every voxel below (lowest_brain_z + offset). Trims the slab so
+# subsequent caudal extension has somewhere to go.
+offset = 10
+
+# --- Brainstem extension (1st pass) -----------------------------------------
+
+[extend_brainstem]
+# Grows the brainstem downward through CSF until it reaches close to the
+# lowest CSF voxel.
+csf_z_tolerance           = 2  # stop once brainstem is within this many voxels of bottom CSF
+extension_dilation_radius = 2  # spherical dilation per growth iteration
+
+[enforce_csf_layer_pre]
+# Insert a thin CSF jacket between every non-CSF tissue boundary, before
+# building falx/tentorium.
+thickness = 1
+
+# --- Pre-anatomy smoothing ---------------------------------------------------
+
+[misc]
+# Smoothing radius applied to the original (pre-cleanup) brain mask
+# that's used to crop the cleaned segmentation back to its original support.
+original_mask_smoothing_radius = 1
+# Toggles for the three mode-filter passes that smooth label boundaries.
+# Disable any of these if you want to inspect intermediate state.
+apply_mode_box_pre      = true   # before falx/tentorium creation
+apply_mode_box_post     = true   # after ventricle fixes
+apply_mode_diamond_post = true   # after the post mode-box pass
+
+# --- Falx ad hoc construction -----------------------------------------------
+
+[falx]
+# Voxel gap forced between the two cerebral hemispheres. Increase if the
+# hemispheres touch through an unphysiological bridge.
+hemisphere_gap                    = 6
+# Gaussian sigma used to compute soft "left territory" / "right territory"
+# scalar fields whose boundary becomes the falx.
+territory_smoothing_sigma         = 20
+# Thickness of the boundary surface extracted between territories.
+boundary_thickness_radius         = 1
+# Falx voxels are kept only if within this distance of cerebral tissue.
+cerebrum_proximity_radius         = 20
+# Falx is suppressed near the corpus callosum interface, brainstem,
+# ventral DC, and the ventricles by this margin.
+non_cerebral_clearance_radius     = 4
+# Falx is suppressed within this margin of the cerebellum.
+cerebellum_clearance_radius       = 2
+# Falx is suppressed within this margin of the third ventricle.
+third_ventricle_clearance_radius  = 30
+# Thickness of the CSF jacket around the new falx label.
+surrounding_csf_radius            = 1
+
+# --- Tentorium ad hoc construction ------------------------------------------
+
+[tentorium]
+# Voxel gap forced between cerebrum and cerebellum.
+cerebrum_cerebellum_gap                 = 3
+# Gaussian sigma for cerebrum/cerebellum territory likelihoods.
+territory_smoothing_sigma               = 6
+# A *broader* cerebellum prior (sigma * factor) is also computed; it
+# prevents the tentorium from cupping under the cerebellum.
+phantom_cerebellum_sigma_factor         = 3
+# Thickness of the boundary surface extracted between territories.
+boundary_thickness_radius               = 1
+# Tentorium voxels are kept only if within this distance of cerebrum/cerebellum.
+cerebrum_cerebellum_proximity_radius    = 12
+# Tentorium is suppressed near the brainstem and ventral DC by this margin.
+brainstem_clearance_radius              = 10
+# Final spherical dilation applied to thicken the tentorium label.
+mask_thickening_radius                  = 1
+# Thickness of the CSF jacket around the new tentorium label.
+surrounding_csf_radius                  = 1
+
+# --- Ventricle topology ------------------------------------------------------
+
+[inf_lat_vent_horns]
+# Closes gaps in the inferior lateral ventricle horn masks.
+horn_closing_radius        = 15
+# Light dilation applied after closing.
+post_close_dilation_radius = 1
+# Spherical-mode smoothing radius for the resulting horn label.
+smoothing_radius           = 2
+
+[min_thickness_v4]
+# Erode→dilate operation that thickens any thin parts of the 4th ventricle
+# below this radius.
+radius = 1
+
+[connected_ventricles]
+# Radius of the connecting tube drawn between disconnected ventricle compartments
+# (V3↔V4 aqueduct, V3↔LV foramina of Monro).
+connection_radius      = 2
+# Mode-smoothing radius applied to each ventricle mask before searching for
+# the closest pair of points to connect.
+mask_smoothing_radius  = 2
+
+[tight_ventricles]
+# Insert a thin tissue jacket around the ventricles to suppress unphysiological
+# CSF connections.
+surrounding_layer_thickness = 3
+# Skip the bottom-most voxels of the layer — keeps the V4 cord exit open.
+bottom_exclusion_z_offset   = 20
+# Distance from which surrounding tissue labels are pulled in to fill the layer.
+tissue_fill_radius          = 10
+
+# --- Final tidying -----------------------------------------------------------
+
+[csf_around_tentorium]
+# Thickness of the CSF re-enforced around the tentorium after the final
+# mode-filter passes.
+radius = 1
+
+[csf_around_falx]
+# Thickness of the CSF re-enforced around the falx after the final
+# mode-filter passes.
+radius = 1
+
+[enforce_csf_layer_post]
+# Final pass of the CSF jacket between any remaining tissue boundaries.
+thickness = 1
+
+[extend_brainstem_caudally]
+# Z-distance above the lowest brainstem voxel where the cross-section
+# ("footprint") used as the extrusion template is sampled.
+footprint_z_offset       = 18
+# Spherical closing on the footprint to bridge gaps before extrusion.
+footprint_closing_radius = 4
+# Radius of the surrounding CSF buffer extruded together with the brainstem.
+csf_buffer_radius        = 4
+
+# --- Surface output ----------------------------------------------------------
+
+[coarsen_surface]
+# Fraction of triangles removed from the decimated surface output. 0.9
+# means 90% of triangles are removed (target-reduction style).
+decimation_ratio = 0.9

@@ -1,13 +1,18 @@
 """High-level pipeline functions combining segmentation cleanup, surface extraction, and meshing."""
 import pathlib
+from dataclasses import asdict
 
 import nibabel as nib
 import nbmorph as nbm
 import numpy as np
 import pyvista as pv
 
+from .config import SegmentationConfig
 
-def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *, numba_threads=8):
+
+def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
+                            config: SegmentationConfig | None = None,
+                            numba_threads=8):
     """
     Run the full segmentation-cleanup and surface-extraction pipeline.
 
@@ -20,6 +25,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *, numba_thre
     seg_path : str or Path
     out_seg  : str or Path, optional  destination file for the cleaned segmentation
     out_surf : str or Path, optional  destination file for the extracted surface
+    config   : SegmentationConfig, optional  per-step parameter overrides
     numba_threads : int               thread count passed to numba
     """
     import numba
@@ -43,39 +49,46 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *, numba_thre
         straighten_spinal_interface
     )
 
+    cfg = config or SegmentationConfig()
+
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
-    data = solidify_csf(data)
-    data = close_csf_space(data, radius=3, iter=1)
-    data = fill_wm_hyperintensities(data)
-    data = cut_bottom(data)
-    data = extend_brainstem(data)
-    data = enforce_csf_layer(data, thickness=1)
+    data = solidify_csf(data, **asdict(cfg.solidify_csf))
+    data = close_csf_space(data, **asdict(cfg.close_csf_space))
+    data = fill_wm_hyperintensities(data, **asdict(cfg.fill_wm_hyperintensities))
+    data = cut_bottom(data, **asdict(cfg.cut_bottom))
+    data = extend_brainstem(data, **asdict(cfg.extend_brainstem))
+    data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_pre))
 
 
-    orig_mask = nbm.smooth_labels_spherical(data > 0, radius=1)
-    data = nbm.mode_box(data)
-    data = create_falx(data, hemisphere_distance=6)
-    data = create_tentorium(data, distance=3)
-    # connect (often disconnected) inf. lateral ventricle horns with 
+    orig_mask = nbm.smooth_labels_spherical(data > 0,
+                                            radius=cfg.misc.original_mask_smoothing_radius)
+    if cfg.misc.apply_mode_box_pre:
+        data = nbm.mode_box(data)
+    data = create_falx(data, **asdict(cfg.falx))
+    data = create_tentorium(data, **asdict(cfg.tentorium))
+    # connect (often disconnected) inf. lateral ventricle horns with
     # lateral ventricles
-    data = build_inferior_lateral_ventricle_horns(data, radius=3)
+    data = build_inferior_lateral_ventricle_horns(data, **asdict(cfg.inf_lat_vent_horns))
     # make sure the V4 is not too thin
-    data = enforce_min_thickness(data, Label.FOURTH_VENTRICLE, radius=1)
+    data = enforce_min_thickness(data, Label.FOURTH_VENTRICLE,
+                                 radius=cfg.min_thickness_v4.radius)
     # make sure the ventricles are correctly connected!
-    data = enforce_connected_ventricles(data, min_thickness=2)
-    # add a thin layer of tissue around the ventricles, 
+    data = enforce_connected_ventricles(data, **asdict(cfg.connected_ventricles))
+    # add a thin layer of tissue around the ventricles,
     # to unphysiological connections
-    data = enforce_tight_ventricles(data, thickness=3)
+    data = enforce_tight_ventricles(data, **asdict(cfg.tight_ventricles))
 
-    data = nbm.mode_box(data)
-    data = nbm.mode_diamond(data)
+    if cfg.misc.apply_mode_box_post:
+        data = nbm.mode_box(data)
+    if cfg.misc.apply_mode_diamond_post:
+        data = nbm.mode_diamond(data)
 
     data[~orig_mask] = 0
-    data = enforce_csf_around_tentorium(data, radius=1)
-    data = enforce_csf_around_falx(data, radius=1)
-    data = enforce_csf_layer(data, thickness=1)
-    data = extend_brainstem_caudally(data, offset=18)
+    data = enforce_csf_around_tentorium(data, **asdict(cfg.csf_around_tentorium))
+    data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
+    data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))
+    data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
 
     seg_out = nib.Nifti1Image(data, seg.affine)
     
@@ -105,7 +118,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *, numba_thre
         surf.save(out_surf_path)
 
         # Save the decimated surface, appending '_dec' to the provided surface filename
-        surf_dec = coarsen_surface(surf, decimation_ratio=0.9)
+        surf_dec = coarsen_surface(surf, **asdict(cfg.coarsen_surface))
         out_surf_dec_path = out_surf_path.parent / f"{out_surf_path.stem}_dec{out_surf_path.suffix}"
         surf_dec.save(out_surf_dec_path)
     

@@ -12,9 +12,11 @@ from .decorators import track_voxel_changes, plot_voxel_changes, time_func
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def solidify_csf(data):
+def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1):
     mask = data > 0
-    closed_mask = nbmorph.close_labels_spherical(mask, radius=5, iterations=1)
+    closed_mask = nbmorph.close_labels_spherical(
+        mask, radius=mask_closing_radius, iterations=mask_closing_iterations
+    )
     seal = dilate(closed_mask) ^ closed_mask
     holes = ndi.binary_fill_holes(mask + seal) & ~(mask + dilate(seal, radius=1))
     data[holes] = Label.CSF
@@ -46,10 +48,10 @@ def fill_holes_csf(data):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def fill_wm_hyperintensities(data):
+def fill_wm_hyperintensities(data, wm_search_radius=6):
     wm_data = data.copy()
     wm_data[~np.isin(data, [Label.LEFT_CEREBRAL_WHITE_MATTER, Label.RIGHT_CEREBRAL_WHITE_MATTER])] = 0
-    data[data == Label.WM_HYPOINTENSITIES] = dilate(wm_data, radius=6)[data == Label.WM_HYPOINTENSITIES]
+    data[data == Label.WM_HYPOINTENSITIES] = dilate(wm_data, radius=wm_search_radius)[data == Label.WM_HYPOINTENSITIES]
     return data
 
 

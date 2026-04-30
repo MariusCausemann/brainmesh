@@ -7,22 +7,51 @@ def surface_main(argv=None):
         description="Clean up a brain segmentation and extract a multi-boundary surface mesh."
     )
     parser.add_argument("seg", help="Input segmentation (.nii.gz)")
-    
+
     parser.add_argument("--out-seg", default="results/seg.nii.gz",
                         help="Output path for the cleaned segmentation (default: results/seg.nii.gz)")
     parser.add_argument("--out-surf", default="results/surf.vtk",
                         help="Output path for the extracted surface (default: results/surf.vtk)")
-    
+
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to a TOML file with pipeline parameters "
+                             "(see configs/default.toml for the full reference).")
+    parser.add_argument("--hemisphere-gap", type=int, default=None,
+                        help="Override falx.hemisphere_gap (voxel gap forced between hemispheres).")
+    parser.add_argument("--cerebrum-cerebellum-gap", type=int, default=None,
+                        help="Override tentorium.cerebrum_cerebellum_gap.")
+    parser.add_argument("--brainstem-caudal-z-offset", type=int, default=None,
+                        help="Override extend_brainstem_caudally.footprint_z_offset.")
+    parser.add_argument("--ventricle-jacket-thickness", type=int, default=None,
+                        help="Override tight_ventricles.surrounding_layer_thickness.")
+    parser.add_argument("--decimation-ratio", type=float, default=None,
+                        help="Override coarsen_surface.decimation_ratio.")
+
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of numba threads (default: 8)")
     args = parser.parse_args(argv)
 
+    from brainmesh.config import SegmentationConfig
     from brainmesh.pipeline import segmentation_to_surface
+
+    cfg = SegmentationConfig.from_toml(args.config) if args.config else SegmentationConfig()
+    if args.hemisphere_gap is not None:
+        cfg.falx.hemisphere_gap = args.hemisphere_gap
+    if args.cerebrum_cerebellum_gap is not None:
+        cfg.tentorium.cerebrum_cerebellum_gap = args.cerebrum_cerebellum_gap
+    if args.brainstem_caudal_z_offset is not None:
+        cfg.extend_brainstem_caudally.footprint_z_offset = args.brainstem_caudal_z_offset
+    if args.ventricle_jacket_thickness is not None:
+        cfg.tight_ventricles.surrounding_layer_thickness = args.ventricle_jacket_thickness
+    if args.decimation_ratio is not None:
+        cfg.coarsen_surface.decimation_ratio = args.decimation_ratio
+
     segmentation_to_surface(
-        args.seg, 
-        out_seg=args.out_seg, 
-        out_surf=args.out_surf, 
-        numba_threads=args.threads
+        args.seg,
+        out_seg=args.out_seg,
+        out_surf=args.out_surf,
+        config=cfg,
+        numba_threads=args.threads,
     )
 
 def mesh_main(argv=None):

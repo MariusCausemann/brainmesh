@@ -86,21 +86,31 @@ def enforce_wm_thickness(data, thickness=1):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def create_falx(data, hemisphere_distance=4, sigma=20):
+def create_falx(
+    data,
+    hemisphere_gap=4,
+    territory_smoothing_sigma=20,
+    boundary_thickness_radius=1,
+    cerebrum_proximity_radius=20,
+    non_cerebral_clearance_radius=4,
+    cerebellum_clearance_radius=2,
+    third_ventricle_clearance_radius=30,
+    surrounding_csf_radius=1,
+):
     from skimage.filters import gaussian
 
-    data = separate_hemispheres(data, distance=hemisphere_distance)
+    data = separate_hemispheres(data, distance=hemisphere_gap)
     right_mask = np.isin(data, [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER])
     left_mask = np.isin(data, [Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER])
 
-    smooth_right = gaussian(right_mask.astype(np.float32), sigma=sigma)
-    smooth_left = gaussian(left_mask.astype(np.float32), sigma=sigma)
+    smooth_right = gaussian(right_mask.astype(np.float32), sigma=territory_smoothing_sigma)
+    smooth_left = gaussian(left_mask.astype(np.float32), sigma=territory_smoothing_sigma)
     right_territory = smooth_right > smooth_left
 
-    falx_mask = dilate(right_territory, radius=1) ^ right_territory
-    falx_mask += dilate(~right_territory, radius=1) ^ (~right_territory)
+    falx_mask = dilate(right_territory, radius=boundary_thickness_radius) ^ right_territory
+    falx_mask += dilate(~right_territory, radius=boundary_thickness_radius) ^ (~right_territory)
 
-    falx_mask[~dilate(right_mask + left_mask, radius=20)] = 0
+    falx_mask[~dilate(right_mask + left_mask, radius=cerebrum_proximity_radius)] = 0
     falx_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 
     cc_interface = (
@@ -114,48 +124,61 @@ def create_falx(data, hemisphere_distance=4, sigma=20):
     ] + VENTRICLE_LABELS)
     exl_mask += cc_interface
 
-    falx_mask[dilate(exl_mask, radius=4)] = 0
+    falx_mask[dilate(exl_mask, radius=non_cerebral_clearance_radius)] = 0
 
     cerebellum_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_CORTEX])
-    falx_mask[dilate(cerebellum_mask, radius=2)] = 0
-    falx_mask[dilate(data == Label.THIRD_VENTRICLE, radius=30)] = 0
+    falx_mask[dilate(cerebellum_mask, radius=cerebellum_clearance_radius)] = 0
+    falx_mask[dilate(data == Label.THIRD_VENTRICLE, radius=third_ventricle_clearance_radius)] = 0
 
     data[falx_mask] = Label.FALX
-    enforce_csf_around_falx(data, radius=1)
+    enforce_csf_around_falx(data, radius=surrounding_csf_radius)
     return data
 
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def create_tentorium(data, distance=4, sigma=6):
+def create_tentorium(
+    data,
+    cerebrum_cerebellum_gap=4,
+    territory_smoothing_sigma=6,
+    phantom_cerebellum_sigma_factor=3,
+    boundary_thickness_radius=1,
+    cerebrum_cerebellum_proximity_radius=12,
+    brainstem_clearance_radius=10,
+    mask_thickening_radius=1,
+    surrounding_csf_radius=1,
+):
     from skimage.filters import gaussian
 
-    data = separate_cerebellum_and_cerebrum(data, distance=distance)
+    data = separate_cerebellum_and_cerebrum(data, distance=cerebrum_cerebellum_gap)
     cer_mask = np.isin(data, [
         Label.RIGHT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_CORTEX,
         Label.RIGHT_CEREBRAL_WHITE_MATTER, Label.LEFT_CEREBRAL_WHITE_MATTER,
     ])
-    ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, 
+    ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX,
                               Label.RIGHT_CEREBELLUM_CORTEX,
                               Label.LEFT_CEREBELLUM_WHITE_MATTER,
                               Label.RIGHT_CEREBELLUM_WHITE_MATTER])
 
-    smooth_cer = gaussian(cer_mask.astype(np.float32), sigma=sigma)
-    smooth_ceb = gaussian(ceb_mask.astype(np.float32), sigma=sigma)
-    phantom_ceb = gaussian(ceb_mask.astype(np.float32), sigma=sigma * 3)
+    smooth_cer = gaussian(cer_mask.astype(np.float32), sigma=territory_smoothing_sigma)
+    smooth_ceb = gaussian(ceb_mask.astype(np.float32), sigma=territory_smoothing_sigma)
+    phantom_ceb = gaussian(
+        ceb_mask.astype(np.float32),
+        sigma=territory_smoothing_sigma * phantom_cerebellum_sigma_factor,
+    )
     cer_territory = smooth_cer > np.maximum(smooth_ceb, phantom_ceb)
 
-    tent_mask = dilate(cer_territory, radius=1) ^ cer_territory
-    tent_mask[~dilate(ceb_mask + cer_mask, radius=12)] = 0
-    tent_mask[dilate(np.isin(data, [Label.BRAIN_STEM, 
-                                    Label.LEFT_VENTRAL_DC, 
-                                    Label.RIGHT_VENTRAL_DC]), radius=10)] = 0
-    tent_mask = dilate(tent_mask, radius=1)
+    tent_mask = dilate(cer_territory, radius=boundary_thickness_radius) ^ cer_territory
+    tent_mask[~dilate(ceb_mask + cer_mask, radius=cerebrum_cerebellum_proximity_radius)] = 0
+    tent_mask[dilate(np.isin(data, [Label.BRAIN_STEM,
+                                    Label.LEFT_VENTRAL_DC,
+                                    Label.RIGHT_VENTRAL_DC]), radius=brainstem_clearance_radius)] = 0
+    tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
     tent_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 
     data[tent_mask] = Label.TENTORIUM
-    enforce_csf_around_tentorium(data, radius=1)
+    enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
     data[(~cer_territory) & (data == Label.FALX)] = Label.CSF
     return data
 
@@ -163,14 +186,22 @@ def create_tentorium(data, distance=4, sigma=6):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def build_inferior_lateral_ventricle_horns(data, radius=2):
+def build_inferior_lateral_ventricle_horns(
+    data,
+    horn_closing_radius=15,
+    post_close_dilation_radius=1,
+    smoothing_radius=2,
+):
     LV_INF = [Label.LEFT_INFERIOR_LATERAL_VENTRICLE, Label.RIGHT_INFERIOR_LATERAL_VENTRICLE]
     LV = [Label.LEFT_LATERAL_VENTRICLE, Label.RIGHT_LATERAL_VENTRICLE]
     CP = [Label.LEFT_CHOROID_PLEXUS, Label.RIGHT_CHOROID_PLEXUS]
     for LVINFID, LVID, CPID in zip(LV_INF, LV, CP):
         mask = data == LVINFID
-        mask = dilate(nbmorph.close_labels_spherical(mask, radius=15), radius=1)
-        mask = nbmorph.smooth_labels_spherical(mask, 2)
+        mask = dilate(
+            nbmorph.close_labels_spherical(mask, radius=horn_closing_radius),
+            radius=post_close_dilation_radius,
+        )
+        mask = nbmorph.smooth_labels_spherical(mask, smoothing_radius)
         mask[data == CPID] = 0
         data[mask] = LVINFID
     return data
@@ -196,16 +227,16 @@ def _connect_by_line(m1, m2, radius=2):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def enforce_connected_ventricles(data, min_thickness=2):
-    V4_mask = nbmorph.smooth_labels_spherical(data == Label.FOURTH_VENTRICLE, radius=2)
-    V3_mask = nbmorph.smooth_labels_spherical(data == Label.THIRD_VENTRICLE, radius=2)
-    aq_conn = _connect_by_line(V3_mask, V4_mask, radius=min_thickness)
+def enforce_connected_ventricles(data, connection_radius=2, mask_smoothing_radius=2):
+    V4_mask = nbmorph.smooth_labels_spherical(data == Label.FOURTH_VENTRICLE, radius=mask_smoothing_radius)
+    V3_mask = nbmorph.smooth_labels_spherical(data == Label.THIRD_VENTRICLE, radius=mask_smoothing_radius)
+    aq_conn = _connect_by_line(V3_mask, V4_mask, radius=connection_radius)
     data[aq_conn] = Label.FOURTH_VENTRICLE
 
-    RLV_mask = nbmorph.smooth_labels_spherical(data == Label.RIGHT_LATERAL_VENTRICLE, radius=2)
-    LLV_mask = nbmorph.smooth_labels_spherical(data == Label.LEFT_LATERAL_VENTRICLE, radius=2)
-    fm_conn = _connect_by_line(V3_mask, RLV_mask, radius=min_thickness)
-    fm_conn += _connect_by_line(V3_mask, LLV_mask, radius=min_thickness)
+    RLV_mask = nbmorph.smooth_labels_spherical(data == Label.RIGHT_LATERAL_VENTRICLE, radius=mask_smoothing_radius)
+    LLV_mask = nbmorph.smooth_labels_spherical(data == Label.LEFT_LATERAL_VENTRICLE, radius=mask_smoothing_radius)
+    fm_conn = _connect_by_line(V3_mask, RLV_mask, radius=connection_radius)
+    fm_conn += _connect_by_line(V3_mask, LLV_mask, radius=connection_radius)
     data[fm_conn] = Label.THIRD_VENTRICLE
     return data
 
@@ -213,14 +244,19 @@ def enforce_connected_ventricles(data, min_thickness=2):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def enforce_tight_ventricles(data, thickness=2):
+def enforce_tight_ventricles(
+    data,
+    surrounding_layer_thickness=2,
+    bottom_exclusion_z_offset=20,
+    tissue_fill_radius=10,
+):
     ventricle_mask = np.isin(data, VENTRICLE_LABELS)
-    v_layer = dilate(ventricle_mask, radius=thickness) ^ ventricle_mask
+    v_layer = dilate(ventricle_mask, radius=surrounding_layer_thickness) ^ ventricle_mask
     v_lowest = get_lowest_point(v_layer)
-    v_layer[:, :, :v_lowest[2] + 20] = 0
+    v_layer[:, :, :v_lowest[2] + bottom_exclusion_z_offset] = 0
     tissue = data.copy()
     tissue[np.isin(tissue, VENTRICLE_LABELS + [Label.CSF])] = 0
-    tissue = dilate(tissue, radius=10)
+    tissue = dilate(tissue, radius=tissue_fill_radius)
     data = np.where(v_layer, tissue, data)
     return data
 
@@ -228,18 +264,23 @@ def enforce_tight_ventricles(data, thickness=2):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def extend_brainstem_caudally(data, offset=12):
+def extend_brainstem_caudally(
+    data,
+    footprint_z_offset=12,
+    footprint_closing_radius=4,
+    csf_buffer_radius=4,
+):
     """Extends the brainstem downwards through the CSF to the bottom of the image."""
     lowest_brain_stem = get_lowest_point(data == Label.BRAIN_STEM)[2]
     lowest_csf = get_lowest_point(data == Label.CSF)[2]
 
     extend_down = 0
-    footprint = data[:, :, lowest_brain_stem + offset:lowest_brain_stem + offset + 1] == Label.BRAIN_STEM
-    footprint = nbmorph.close_labels_spherical(footprint, radius=4)
-    footprint_csf = nbmorph.dilate_labels_spherical(footprint, radius=4)
+    footprint = data[:, :, lowest_brain_stem + footprint_z_offset:lowest_brain_stem + footprint_z_offset + 1] == Label.BRAIN_STEM
+    footprint = nbmorph.close_labels_spherical(footprint, radius=footprint_closing_radius)
+    footprint_csf = nbmorph.dilate_labels_spherical(footprint, radius=csf_buffer_radius)
 
     z_min = max(0, min(lowest_brain_stem, lowest_csf) - extend_down)
-    z_max = max(lowest_brain_stem, lowest_csf) + offset
+    z_max = max(lowest_brain_stem, lowest_csf) + footprint_z_offset
     target_block = data[:, :, z_min:z_max]
 
     for fp, l in [(footprint_csf, Label.CSF), (footprint, Label.BRAIN_STEM)]:
@@ -251,13 +292,13 @@ def extend_brainstem_caudally(data, offset=12):
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def extend_brainstem(data):
+def extend_brainstem(data, csf_z_tolerance=2, extension_dilation_radius=2):
     dil_stem_mask = data == Label.BRAIN_STEM
     lowest_csf_z = get_lowest_point(data == Label.CSF)[2]
     lowest_bs_z = get_lowest_point(data == Label.BRAIN_STEM)[2]
 
-    while lowest_bs_z > lowest_csf_z + 2:
-        dil_stem_mask = dilate(dil_stem_mask, 2)
+    while lowest_bs_z > lowest_csf_z + csf_z_tolerance:
+        dil_stem_mask = dilate(dil_stem_mask, extension_dilation_radius)
         dil_stem_mask[data > 0] = 0
         lowest_bs_z = get_lowest_point(dil_stem_mask)[2]
 

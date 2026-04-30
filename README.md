@@ -27,7 +27,17 @@ pip install -e ".[dev]"
 
 ```bash
 # Step 1: segmentation → surface mesh
-brainmesh-surface testdata/sub1_gouhfi_hybrid_seg.nii.gz -o results/
+brainmesh-surface testdata/sub1.nii.gz --out-seg results/seg.nii.gz --out-surf results/surf.vtk
+
+# With a subject-specific parameter file (copy configs/default.toml and edit)
+brainmesh-surface testdata/sub1.nii.gz --config my_subject.toml --out-surf results/surf.vtk
+
+# The most commonly tuned parameters are also available as direct CLI flags:
+brainmesh-surface testdata/sub1.nii.gz \
+    --hemisphere-gap 8 \
+    --cerebrum-cerebellum-gap 4 \
+    --brainstem-caudal-z-offset 20 \
+    --out-surf results/surf.vtk
 
 # Step 2: surface → tetrahedral mesh
 brainmesh-mesh results/surf.vtk -o results/
@@ -102,14 +112,60 @@ The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, b
 | `-o` / `--output` | `snapped_output.vtk` | Output path |
 | `--min-quality-factor` | `0.8` | Minimum allowed quality as a fraction of the original mesh's minimum — nodes are relaxed if snapping would drop below this threshold |
 
+### Tuning the segmentation pipeline
+
+Every numerical parameter in the segmentation cleanup steps is configurable via a TOML file. `configs/default.toml` is a fully-annotated reference that reproduces the built-in defaults — copy it, edit only the values you want to change, and pass it with `--config`:
+
+```toml
+# my_subject.toml — only overriding the values that need to change
+[falx]
+hemisphere_gap = 8           # larger gap for a brain with bridging tissue
+
+[tentorium]
+cerebrum_cerebellum_gap = 5  # adjust separation distance
+
+[extend_brainstem_caudally]
+footprint_z_offset = 22      # sample footprint higher up the brainstem
+```
+
+All other parameters retain their defaults. Missing sections and missing keys within a section both fall back to defaults. Passing an unknown key raises an error.
+
+`brainmesh-surface` also accepts a handful of the most commonly tuned parameters as direct CLI flags (these override the config file if both are given):
+
+| Flag | Config key | Description |
+|---|---|---|
+| `--config` | — | Path to TOML config file |
+| `--hemisphere-gap` | `falx.hemisphere_gap` | Voxel gap forced between hemispheres |
+| `--cerebrum-cerebellum-gap` | `tentorium.cerebrum_cerebellum_gap` | Gap between cerebrum and cerebellum |
+| `--brainstem-caudal-z-offset` | `extend_brainstem_caudally.footprint_z_offset` | Z-offset for brainstem extrusion footprint |
+| `--ventricle-jacket-thickness` | `tight_ventricles.surrounding_layer_thickness` | Tissue jacket around ventricles |
+| `--decimation-ratio` | `coarsen_surface.decimation_ratio` | Triangle reduction ratio for decimated output |
+
 ### Python API
 
 ```python
 from brainmesh.pipeline import segmentation_to_surface, surface_to_mesh
+from brainmesh.config import SegmentationConfig
 from brainmesh.curved_mesh import convert_to_quadratic, adaptive_snap_boundaries
 
-surf = segmentation_to_surface("testdata/sub1.nii.gz", out_dir="results")
-mesh = surface_to_mesh("results/surf.vtk", out_dir="results")
+# Use built-in defaults
+surf = segmentation_to_surface("testdata/sub1.nii.gz",
+                               out_seg="results/seg.nii.gz",
+                               out_surf="results/surf.vtk")
+
+# Load from a TOML file
+cfg = SegmentationConfig.from_toml("my_subject.toml")
+surf = segmentation_to_surface("testdata/sub1.nii.gz",
+                               out_surf="results/surf.vtk",
+                               config=cfg)
+
+# Or override individual fields programmatically
+cfg = SegmentationConfig()
+cfg.falx.hemisphere_gap = 8
+cfg.tentorium.territory_smoothing_sigma = 15.0
+surf = segmentation_to_surface("testdata/sub1.nii.gz", config=cfg)
+
+mesh = surface_to_mesh("results/surf.vtk", out_file="results/mesh.vtk")
 
 # Optionally curve the mesh
 quad_mesh = convert_to_quadratic(mesh)
@@ -123,6 +179,7 @@ quad_mesh.save("results/mesh_curved.vtk")
 src/brainmesh/
   labels.py       — FreeSurfer/SynthSeg label definitions (Label namedtuple)
   io.py           — nibabel ↔ PyVista conversion, upsampling
+  config.py       — SegmentationConfig dataclasses + TOML loader
   segmentation.py — voxel-label cleanup (CSF enforcement, smoothing, ...)
   anatomy.py      — anatomically-specific ops (falx, tentorium, brainstem, ...)
   surface.py      — surface extraction, decimation, label transfer
@@ -130,6 +187,9 @@ src/brainmesh/
   curved_mesh.py  — quadratic conversion and boundary snapping
   pipeline.py     — high-level end-to-end functions
   cli.py          — argparse entry points
+
+configs/
+  default.toml    — annotated reference config (copy & edit per subject)
 ```
 
 ## Running tests

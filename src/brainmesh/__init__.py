@@ -43,6 +43,7 @@ from .mesh import (
     mark_facets,
 )
 from .phantom import make_phantom_seg
+from .config import SegmentationConfig
 
 __all__ = [
     "Label",
@@ -84,4 +85,5 @@ __all__ = [
     "mark_spinal_boundary",
     "mark_facets",
     "make_phantom_seg",
+    "SegmentationConfig",
 ]
