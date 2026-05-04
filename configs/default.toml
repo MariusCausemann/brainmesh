@@ -70,7 +70,7 @@ territory_smoothing_sigma         = 20
 # Thickness of the boundary surface extracted between territories.
 boundary_thickness_radius         = 1
 # Falx voxels are kept only if within this distance of cerebral tissue.
-cerebrum_proximity_radius         = 20
+cerebrum_proximity_radius         = 25
 # Falx is suppressed near the corpus callosum interface, brainstem,
 # ventral DC, and the ventricles by this margin.
 non_cerebral_clearance_radius     = 4

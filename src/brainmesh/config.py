@@ -49,7 +49,7 @@ class FalxCfg:
     hemisphere_gap: int = 6
     territory_smoothing_sigma: float = 20.0
     boundary_thickness_radius: int = 1
-    cerebrum_proximity_radius: int = 20
+    cerebrum_proximity_radius: int = 25
     non_cerebral_clearance_radius: int = 4
     cerebellum_clearance_radius: int = 2
     third_ventricle_clearance_radius: int = 30

@@ -30,7 +30,7 @@ class TestDefaults:
         cfg = SegmentationConfig()
         assert cfg.falx.hemisphere_gap == 6
         assert cfg.falx.territory_smoothing_sigma == 20.0
-        assert cfg.falx.cerebrum_proximity_radius == 20
+        assert cfg.falx.cerebrum_proximity_radius == 25
         assert cfg.falx.non_cerebral_clearance_radius == 4
         assert cfg.falx.cerebellum_clearance_radius == 2
         assert cfg.falx.third_ventricle_clearance_radius == 30
