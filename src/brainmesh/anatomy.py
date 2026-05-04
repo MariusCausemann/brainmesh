@@ -3,6 +3,7 @@ import numpy as np
 import nbmorph
 import skimage
 from skimage import morphology
+from skimage import measure
 from numba import njit
 from edt import edt
 from nbmorph import dilate_labels_spherical as dilate
@@ -243,6 +244,8 @@ def enforce_connected_ventricles(data, connection_radius=2, mask_smoothing_radiu
     fm_conn = _connect_by_line(V3_mask, RLV_mask, radius=connection_radius)
     fm_conn += _connect_by_line(V3_mask, LLV_mask, radius=connection_radius)
     data[fm_conn] = Label.THIRD_VENTRICLE
+    _, num_features = measure.label(np.isin(data, VENTRICLE_LABELS), connectivity=1, return_num=True)
+    assert num_features == 1
     return data
 
 
