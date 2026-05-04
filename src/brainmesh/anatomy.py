@@ -92,7 +92,7 @@ def create_falx(
     hemisphere_gap=4,
     territory_smoothing_sigma=20,
     boundary_thickness_radius=1,
-    cerebrum_proximity_radius=20,
+    cerebrum_proximity_radius=25,
     non_cerebral_clearance_radius=4,
     cerebellum_clearance_radius=2,
     third_ventricle_clearance_radius=30,
