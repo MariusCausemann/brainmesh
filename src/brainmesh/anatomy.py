@@ -2,6 +2,7 @@
 import numpy as np
 import nbmorph
 import skimage
+from skimage import morphology
 from numba import njit
 from edt import edt
 from nbmorph import dilate_labels_spherical as dilate
@@ -110,7 +111,7 @@ def create_falx(
     falx_mask = dilate(right_territory, radius=boundary_thickness_radius) ^ right_territory
     falx_mask += dilate(~right_territory, radius=boundary_thickness_radius) ^ (~right_territory)
 
-    falx_mask[~dilate(right_mask + left_mask, radius=cerebrum_proximity_radius)] = 0
+    falx_mask[~dilate(right_mask | left_mask, radius=cerebrum_proximity_radius)] = 0
     falx_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 
     cc_interface = (
@@ -177,6 +178,7 @@ def create_tentorium(
     tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
     tent_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 
+    tent_mask = morphology.remove_small_objects(tent_mask, min_size=500)
     data[tent_mask] = Label.TENTORIUM
     enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
     data[(~cer_territory) & (data == Label.FALX)] = Label.CSF
