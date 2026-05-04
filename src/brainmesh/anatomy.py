@@ -160,7 +160,8 @@ def create_tentorium(
     ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX,
                               Label.RIGHT_CEREBELLUM_CORTEX,
                               Label.LEFT_CEREBELLUM_WHITE_MATTER,
-                              Label.RIGHT_CEREBELLUM_WHITE_MATTER])
+                              Label.RIGHT_CEREBELLUM_WHITE_MATTER,
+                              Label.LEFT_THALAMUS, Label.RIGHT_THALAMUS])
 
     smooth_cer = gaussian(cer_mask.astype(np.float32), sigma=territory_smoothing_sigma)
     smooth_ceb = gaussian(ceb_mask.astype(np.float32), sigma=territory_smoothing_sigma)
@@ -174,7 +175,9 @@ def create_tentorium(
     tent_mask[~dilate(ceb_mask + cer_mask, radius=cerebrum_cerebellum_proximity_radius)] = 0
     tent_mask[dilate(np.isin(data, [Label.BRAIN_STEM,
                                     Label.LEFT_VENTRAL_DC,
-                                    Label.RIGHT_VENTRAL_DC]), radius=brainstem_clearance_radius)] = 0
+                                    Label.RIGHT_VENTRAL_DC,
+                                    Label.LEFT_THALAMUS,
+                                    Label.RIGHT_THALAMUS]), radius=brainstem_clearance_radius)] = 0
     tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
     tent_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
 
