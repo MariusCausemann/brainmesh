@@ -148,7 +148,7 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
         edge_length_fac=0.05,
         epsilon=1e-3,
         coarsen=False,
-        num_threads=8
+        num_threads=0
     )
     twild_defaults.update(tetwild_kwargs)
 

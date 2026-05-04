@@ -71,6 +71,8 @@ def mesh_main(argv=None):
                         help="Enable fTetWild coarsening pass")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress fTetWild log output")
+    parser.add_argument("--num-threads", type=int, default=0,
+                        help="fTetWild number of threads (default all)")
     args = parser.parse_args(argv)
 
     from brainmesh.pipeline import surface_to_mesh
@@ -82,6 +84,7 @@ def mesh_main(argv=None):
         epsilon=args.epsilon,
         coarsen=args.coarsen,
         quiet=args.quiet,
+        num_threads=args.num_threads,
     )
 
 def curve_mesh_main(argv=None):
