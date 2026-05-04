@@ -65,6 +65,8 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
                                             radius=cfg.misc.original_mask_smoothing_radius)
     if cfg.misc.apply_mode_box_pre:
         data = nbm.mode_box(data)
+        data[~orig_mask] = 0
+        
     data = create_falx(data, **asdict(cfg.falx))
     data = create_tentorium(data, **asdict(cfg.tentorium))
     # connect (often disconnected) inf. lateral ventricle horns with
@@ -79,12 +81,14 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     # to unphysiological connections
     data = enforce_tight_ventricles(data, **asdict(cfg.tight_ventricles))
 
+    data[~orig_mask] = 0
+
     if cfg.misc.apply_mode_box_post:
         data = nbm.mode_box(data)
     if cfg.misc.apply_mode_diamond_post:
         data = nbm.mode_diamond(data)
-
     data[~orig_mask] = 0
+
     data = enforce_csf_around_tentorium(data, **asdict(cfg.csf_around_tentorium))
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))

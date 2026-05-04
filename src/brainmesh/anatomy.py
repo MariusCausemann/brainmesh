@@ -105,8 +105,10 @@ def create_falx(
     right_mask = np.isin(data, [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER])
     left_mask = np.isin(data, [Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER])
 
-    smooth_right = gaussian(right_mask.astype(np.float32), sigma=territory_smoothing_sigma)
-    smooth_left = gaussian(left_mask.astype(np.float32), sigma=territory_smoothing_sigma)
+    smooth_right = gaussian(right_mask.astype(np.float32),
+                             sigma=territory_smoothing_sigma, truncate=2)
+    smooth_left = gaussian(left_mask.astype(np.float32),
+                            sigma=territory_smoothing_sigma, truncate=2)
     right_territory = smooth_right > smooth_left
 
     falx_mask = dilate(right_territory, radius=boundary_thickness_radius) ^ right_territory
@@ -131,6 +133,7 @@ def create_falx(
     cerebellum_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_CORTEX])
     falx_mask[dilate(cerebellum_mask, radius=cerebellum_clearance_radius)] = 0
     falx_mask[dilate(data == Label.THIRD_VENTRICLE, radius=third_ventricle_clearance_radius)] = 0
+    falx_mask = morphology.remove_small_objects(falx_mask, max_size=500)
 
     data[falx_mask] = Label.FALX
     enforce_csf_around_falx(data, radius=surrounding_csf_radius)
@@ -157,18 +160,21 @@ def create_tentorium(
     cer_mask = np.isin(data, [
         Label.RIGHT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_CORTEX,
         Label.RIGHT_CEREBRAL_WHITE_MATTER, Label.LEFT_CEREBRAL_WHITE_MATTER,
+        Label.LEFT_THALAMUS, Label.RIGHT_THALAMUS
     ])
     ceb_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX,
                               Label.RIGHT_CEREBELLUM_CORTEX,
                               Label.LEFT_CEREBELLUM_WHITE_MATTER,
-                              Label.RIGHT_CEREBELLUM_WHITE_MATTER,
-                              Label.LEFT_THALAMUS, Label.RIGHT_THALAMUS])
+                              Label.RIGHT_CEREBELLUM_WHITE_MATTER])
 
-    smooth_cer = gaussian(cer_mask.astype(np.float32), sigma=territory_smoothing_sigma)
-    smooth_ceb = gaussian(ceb_mask.astype(np.float32), sigma=territory_smoothing_sigma)
+    smooth_cer = gaussian(cer_mask.astype(np.float32),
+                           sigma=territory_smoothing_sigma, truncate=2)
+    smooth_ceb = gaussian(ceb_mask.astype(np.float32),
+                           sigma=territory_smoothing_sigma, truncate=2)
     phantom_ceb = gaussian(
         ceb_mask.astype(np.float32),
         sigma=territory_smoothing_sigma * phantom_cerebellum_sigma_factor,
+        truncate=2
     )
     cer_territory = smooth_cer > np.maximum(smooth_ceb, phantom_ceb)
 
@@ -180,9 +186,9 @@ def create_tentorium(
                                     Label.LEFT_THALAMUS,
                                     Label.RIGHT_THALAMUS]), radius=brainstem_clearance_radius)] = 0
     tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
-    tent_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
+    tent_mask[data==0] = 0
 
-    tent_mask = morphology.remove_small_objects(tent_mask, min_size=500)
+    tent_mask = morphology.remove_small_objects(tent_mask, max_size=500)
     data[tent_mask] = Label.TENTORIUM
     enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
     data[(~cer_territory) & (data == Label.FALX)] = Label.CSF
@@ -234,18 +240,29 @@ def _connect_by_line(m1, m2, radius=2):
 @track_voxel_changes
 @time_func
 def enforce_connected_ventricles(data, connection_radius=2, mask_smoothing_radius=2):
-    V4_mask = nbmorph.smooth_labels_spherical(data == Label.FOURTH_VENTRICLE, radius=mask_smoothing_radius)
-    V3_mask = nbmorph.smooth_labels_spherical(data == Label.THIRD_VENTRICLE, radius=mask_smoothing_radius)
+    V4_mask = data == Label.FOURTH_VENTRICLE
+    V3_mask = data == Label.THIRD_VENTRICLE
     aq_conn = _connect_by_line(V3_mask, V4_mask, radius=connection_radius)
     data[aq_conn] = Label.FOURTH_VENTRICLE
 
-    RLV_mask = nbmorph.smooth_labels_spherical(data == Label.RIGHT_LATERAL_VENTRICLE, radius=mask_smoothing_radius)
-    LLV_mask = nbmorph.smooth_labels_spherical(data == Label.LEFT_LATERAL_VENTRICLE, radius=mask_smoothing_radius)
+    RLV_mask = data == Label.RIGHT_LATERAL_VENTRICLE
+    LLV_mask = data == Label.LEFT_LATERAL_VENTRICLE
     fm_conn = _connect_by_line(V3_mask, RLV_mask, radius=connection_radius)
     fm_conn += _connect_by_line(V3_mask, LLV_mask, radius=connection_radius)
     data[fm_conn] = Label.THIRD_VENTRICLE
-    _, num_features = measure.label(np.isin(data, VENTRICLE_LABELS), connectivity=1, return_num=True)
-    assert num_features == 1
+    label, num_features = measure.label(np.isin(data, VENTRICLE_LABELS),
+                                         connectivity=2, return_num=True)
+    if num_features > 1:
+        import pyvista as pv
+        grid = pv.ImageData(dimensions=[i + 1 for i in data.shape])
+        data[~np.isin(data, VENTRICLE_LABELS)] = 0
+        grid.cell_data["data"] = data.flatten(order="F")
+        grid.cell_data["label"] = label.flatten(order="F")
+        debug_name = f"ventricles_{np.random.randint(low=0, high=10000)}.vti"
+        grid.save(debug_name)
+        print(f"enforcing connected ventricles failed. See {debug_name}.")
+        assert num_features ==1
+
     return data
 
 
