@@ -51,14 +51,40 @@ def smooth_1d_lines_taubin(line_mesh, iterations=50, lambda_val=0.5, mu_val=-0.5
 
 @time_func
 def straighten_spinal_interface(surf, orig_grid):
-    grid = orig_grid.copy()
-    grid.direction_matrix = np.round(grid.direction_matrix, 0)
-    surf_rough = grid.contour_labels("all", smoothing=False)
-    bottom_points = np.isclose(surf_rough.points[:, 2], surf_rough.points[:, 2].min())
-    surf.points[bottom_points, 2] = surf.points[:, 2].min()
+    # Get the local Z-axis direction (normal vector of the bottom plane)
+    # Assuming standard affine conventions, the 3rd column is the Z-axis direction.
+    n = orig_grid.direction_matrix[:, 2]
+    n = n / np.linalg.norm(n) # Ensure it's a normalized unit vector
+
+    # 2. Extract rough surface WITHOUT altering the direction matrix
+    surf_rough = orig_grid.contour_labels("all", smoothing=False)
+    
+    # 3. Project rough points onto the normal vector to find the 'bottom'
+    projections_rough = np.dot(surf_rough.points, n)
+    min_proj_rough = projections_rough.min()
+    
+    # Mask for the bottom points
+    bottom_points_mask = np.isclose(projections_rough, min_proj_rough)
+    
+    # 4. Flatten the actual surf's bottom points onto the tilted plane
+    # Find the target minimum projection on the high-res surface
+    min_proj_surf = np.dot(surf.points, n).min()
+    
+    # Calculate how far the masked points are from the target plane
+    projections_masked = np.dot(surf.points[bottom_points_mask], n)
+    distances_to_plane = projections_masked - min_proj_surf
+    
+    # Shift points along the normal vector to snap them to the plane
+    surf.points[bottom_points_mask] -= distances_to_plane[:, None] * n
+    
+    # 5. Extract the bottom patch using cell centers
+    centers = surf.cell_centers().points
+    center_projections = np.dot(centers, n)
+    min_center_proj = center_projections.min()
+    
     bottom_patch = (
         surf.extract_cells(
-            np.isclose(surf.cell_centers().points[:, 2], surf.points[:, 2].min())
+            np.isclose(center_projections, min_center_proj)
         )
         .extract_surface(algorithm=None)
         .extract_feature_edges()
@@ -69,10 +95,11 @@ def straighten_spinal_interface(surf, orig_grid):
 
     bottom_patch = smooth_1d_lines_taubin(bottom_patch)
     surf.points[original_surf_indices] = bottom_patch.points
+    surf.field_data["grid_z_normal"] = n
     return surf
-
 
 @time_func
 def coarsen_surface(surf, decimation_ratio=0.5):
     surf_dec = surf.decimate(decimation_ratio)
+    surf.field_data["grid_z_normal"] = surf_dec.field_data["grid_z_normal"]
     return transfer_labels(surf, surf_dec, "boundary_labels")
