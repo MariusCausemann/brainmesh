@@ -50,12 +50,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     )
 
     cfg = config or SegmentationConfig()
-
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
     data = solidify_csf(data, **asdict(cfg.solidify_csf))
     data = close_csf_space(data, **asdict(cfg.close_csf_space))
-    data = fill_wm_hyperintensities(data, **asdict(cfg.fill_wm_hyperintensities))
+    data = fill_wm_hyperintensities(data)
     data = cut_bottom(data, **asdict(cfg.cut_bottom))
     data = extend_brainstem(data, **asdict(cfg.extend_brainstem))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_pre))
@@ -93,7 +92,6 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))
     data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
-
     seg_out = nib.Nifti1Image(data, seg.affine)
     
     # We still need the grid for surface extraction
@@ -160,7 +158,7 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
     mesh = mark_mesh(mesh, surf)
     out_dir = pathlib.Path(out_file).parent
     out_dir.mkdir(parents=True, exist_ok=True)
-
+    mesh.field_data["grid_z_normal"] = surf.field_data["grid_z_normal"]
     mesh.save(out_file)
     return mesh
 
