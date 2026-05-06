@@ -24,11 +24,6 @@ class CloseCSFSpaceCfg:
 
 
 @dataclass
-class FillWMHyperCfg:
-    wm_search_radius: int = 6
-
-
-@dataclass
 class CutBottomCfg:
     offset: int = 10
 
@@ -83,7 +78,6 @@ class MinThicknessV4Cfg:
 @dataclass
 class ConnectedVentriclesCfg:
     connection_radius: int = 2
-    mask_smoothing_radius: int = 2
 
 
 @dataclass
@@ -122,7 +116,6 @@ class PipelineMiscCfg:
 class SegmentationConfig:
     solidify_csf: SolidifyCSFCfg = field(default_factory=SolidifyCSFCfg)
     close_csf_space: CloseCSFSpaceCfg = field(default_factory=CloseCSFSpaceCfg)
-    fill_wm_hyperintensities: FillWMHyperCfg = field(default_factory=FillWMHyperCfg)
     cut_bottom: CutBottomCfg = field(default_factory=CutBottomCfg)
     extend_brainstem: ExtendBrainstemCfg = field(default_factory=ExtendBrainstemCfg)
     enforce_csf_layer_pre: EnforceCSFLayerCfg = field(default_factory=EnforceCSFLayerCfg)
