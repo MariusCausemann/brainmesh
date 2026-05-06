@@ -534,6 +534,10 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     corners = points[faces[:, :3]]          # (N, 3, 3)
     centroids = corners.mean(axis=1)        # (N, 3)
 
+    up_normal = np.asarray(mesh.field_data["grid_z_normal"]).flatten()
+    print(up_normal)
+    down_normal = -up_normal
+
     # Compute raw face normals from corner winding order.
     e1 = corners[:, 1] - corners[:, 0]
     e2 = corners[:, 2] - corners[:, 0]
@@ -548,15 +552,18 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     normals[inward] *= -1
 
     # Criterion 1: parent tet is a CSF cell.
-    csf_mask = np.isin(boundary, csf_labels) + (boundary > SAS_LABEL_OFFSET)
+    csf_mask = np.isin(boundary, csf_labels) | (boundary > SAS_LABEL_OFFSET)
 
-    # Criterion 2: outward normal within max_angle of (0, 0, -1).
+    # Criterion 2: outward normal within max_angle of the recovered down_normal.
+    dot_products = np.dot(normals, down_normal)
     cos_thresh = np.cos(np.deg2rad(max_angle))
-    normal_mask = normals[:, 2] < -cos_thresh
+    normal_mask = dot_products > cos_thresh
 
-    # Criterion 3: centroid z within max_distance of the lowest boundary face centroid.
-    z_min = centroids[:, 2].min()
-    z_mask = centroids[:, 2] <= z_min + max_distance
+    # Criterion 3: centroid projection within max_distance of the lowest boundary face.
+    # Project all centroids onto the UPWARD normal axis
+    projections = np.dot(centroids, up_normal)
+    min_proj = projections.min()
+    z_mask = projections <= min_proj + max_distance
 
     spinal_mask = csf_mask & normal_mask & z_mask
     spinal_faces = faces[spinal_mask]
@@ -670,6 +677,7 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
         regular_ids,
         spinal_ids,
     ])
+    combined.field_data["grid_z_normal"] = mesh.field_data["grid_z_normal"]
     return combined
 
 
