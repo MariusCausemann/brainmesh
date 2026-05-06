@@ -97,7 +97,6 @@ class TestEnforceConnectedVentricles:
         result = enforce_connected_ventricles(
             ventricle_seg.copy(),
             connection_radius=1,
-            mask_smoothing_radius=1,
         )
         assert result.dtype == np.uint8
 
@@ -124,7 +123,6 @@ class TestEnforceConnectedVentricles:
         result = enforce_connected_ventricles(
             data.copy(),
             connection_radius=2,
-            mask_smoothing_radius=1,
         )
 
         all_v_after = np.isin(result, VENTRICLE_LABELS)
@@ -191,6 +189,7 @@ class TestBuildInfLatVentHorns:
     def test_kwargs_accepted(self):
         data = np.zeros((20, 20, 20), dtype=np.uint8)
         data[8:12, 8:12, 8:12] = Label.LEFT_INFERIOR_LATERAL_VENTRICLE
+        data[14:16, 14:16, 14:16] = Label.LEFT_LATERAL_VENTRICLE
         result = build_inferior_lateral_ventricle_horns(
             data.copy(),
             horn_closing_radius=3,
@@ -207,13 +206,16 @@ class TestBuildInfLatVentHorns:
         merged into a single connected region by the spherical closing pass."""
         data = np.zeros((30, 30, 30), dtype=np.uint8)
         lbl = Label.LEFT_INFERIOR_LATERAL_VENTRICLE
+        
         # Two cubes separated by a 4-voxel gap along z (z=10:14)
         data[10:16, 10:16, 5:10] = lbl
         data[10:16, 10:16, 14:19] = lbl
+        # and a cube of lateral ventricles:
+        data[10:16, 10:16, 24:27] = Label.LEFT_LATERAL_VENTRICLE
 
-        # Precondition: really are two separate components
-        _, n_before = scipy_label(data == lbl)
-        assert n_before == 2, f"Fixture should have 2 islands, got {n_before}"
+        # Precondition: really are three separate components
+        _, n_before = scipy_label((data == lbl) | (data==Label.LEFT_LATERAL_VENTRICLE))
+        assert n_before == 3, f"Fixture should have 3 islands, got {n_before}"
 
         result = build_inferior_lateral_ventricle_horns(
             data.copy(),
