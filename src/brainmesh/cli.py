@@ -116,6 +116,8 @@ def curve_mesh_main(argv=None):
 
     print("Converting to 2nd-order quadratic tetrahedra...")
     quad_mesh = convert_to_quadratic(input_mesh)
+    quad_mesh.field_data["grid_z_normal"] = quad_mesh.field_data["grid_z_normal"]
+
     orig_q = print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
 
     print("Snapping boundary nodes to target surface...")
