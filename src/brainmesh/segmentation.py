@@ -44,15 +44,28 @@ def fill_holes_csf(data):
     data[holes] = Label.CSF
     return data
 
+def fill_from_neighbors(data, mask, neighbors, max_radius=100):
+    if mask.sum() == 0: return data
+    nb_mask = data.copy()
+    nb_mask[~np.isin(data, neighbors)] = 0
+    nb_mask[mask] = 0
+    num_empty_voxels = ((nb_mask==0) & mask).sum()
+    for _ in range(max_radius):
+        nb_mask = dilate(nb_mask, radius=1)
+        num_empty_voxels = ((nb_mask==0) & mask).sum()
+        if num_empty_voxels==0:
+            break
+
+    data[mask] = nb_mask[mask]
+    return data
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def fill_wm_hyperintensities(data, wm_search_radius=6):
-    wm_data = data.copy()
-    wm_data[~np.isin(data, [Label.LEFT_CEREBRAL_WHITE_MATTER, Label.RIGHT_CEREBRAL_WHITE_MATTER])] = 0
-    data[data == Label.WM_HYPOINTENSITIES] = dilate(wm_data, radius=wm_search_radius)[data == Label.WM_HYPOINTENSITIES]
-    return data
+def fill_wm_hyperintensities(data):
+    return fill_from_neighbors(data, data==Label.WM_HYPOINTENSITIES, 
+                        [Label.LEFT_CEREBRAL_WHITE_MATTER,
+                         Label.RIGHT_CEREBRAL_WHITE_MATTER])
 
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
