@@ -23,10 +23,6 @@ radius                = 3
 iter                  = 1
 brainstem_area_radius = 0   # > 0 restricts CSF filling to the brainstem neighbourhood
 
-[fill_wm_hyperintensities]
-# Replace WM_HYPOINTENSITIES voxels with the dominant nearby WM label
-# found within this many voxels.
-wm_search_radius = 6
 
 [cut_bottom]
 # Remove every voxel below (lowest_brain_z + offset). Trims the slab so
@@ -121,9 +117,7 @@ radius = 1
 # Radius of the connecting tube drawn between disconnected ventricle compartments
 # (V3↔V4 aqueduct, V3↔LV foramina of Monro).
 connection_radius      = 2
-# Mode-smoothing radius applied to each ventricle mask before searching for
-# the closest pair of points to connect.
-mask_smoothing_radius  = 2
+
 
 [tight_ventricles]
 # Insert a thin tissue jacket around the ventricles to suppress unphysiological
