@@ -22,7 +22,8 @@ dependencies = [
     "scikit-image",
     "scipy",
     "numba",
-    "vtk>=9.6"
+    "vtk>=9.6",
+    "matplotlib"
 ]
 
 [project.urls]
@@ -37,6 +38,8 @@ brainmesh-mark-facets = "brainmesh.cli:mark_facets_main"
 brainmesh-remark-sas = "brainmesh.cli:remark_sas_main"
 brainmesh-extract-csf = "brainmesh.cli:extract_csf_main"
 brainmesh-group-regions = "brainmesh.cli:group_regions_main"
+brainmesh-plot-mesh = "brainmesh.cli:plot_mesh_main"
+brainmesh-plot-facets = "brainmesh.cli:plot_facets_main"
 
 
 [project.optional-dependencies]

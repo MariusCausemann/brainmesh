@@ -55,7 +55,15 @@ brainmesh-mark-facets results/mesh_marked_sas.vtk -o results/facets.vtk
 # Extract the CSF compartment as a submesh together with its facets
 # (facets are computed on the full mesh so CSF-tissue interfaces are preserved)
 brainmesh-extract-csf results/mesh_marked_sas.vtk -o results/csf_mesh.vtk --facets results/csf_facets.vtk
+
+# Render diagnostic plots (PNG/PDF inferred from extension)
+brainmesh-plot-mesh   results/mesh_marked_sas.vtk -o results/mesh_plot.png
+brainmesh-plot-facets results/csf_facets.vtk      -o results/facets_plot.png
 ```
+
+`brainmesh-plot-mesh` composes a 6-panel figure: ventricular system (per-label colors), falx & tentorium, plus sagittal / coronal / axial mid-plane clips coloured by `marker`.
+
+`brainmesh-plot-facets` composes a 6-panel figure:  six anatomical views (anterior, posterior, left, right, superior, inferior) of the facets coloured by their grouped `region`. Pass `--no-group` if the input already contains a `region` cell array.
 
 `brainmesh-remark-sas` accepts the following options:
 

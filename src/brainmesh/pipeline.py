@@ -52,6 +52,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     cfg = config or SegmentationConfig()
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
+    assert np.shares_memory(data, seg.get_fdata()) == False
     data = solidify_csf(data, **asdict(cfg.solidify_csf))
     data = close_csf_space(data, **asdict(cfg.close_csf_space))
     data = fill_wm_hyperintensities(data)
@@ -116,6 +117,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     # Only save surface outputs if requested
     if out_surf is not None:
         out_surf_path = pathlib.Path(out_surf)
+        grid["data"] = seg.get_fdata().astype(np.uint8).flatten(order="F")
+        origsurf = grid.contour_labels("all", smoothing=True)
+        out_surf_orig_path = out_surf_path.parent / f"{out_surf_path.stem}_orig{out_surf_path.suffix}"
+        origsurf.save(out_surf_orig_path)
+
         out_surf_path.parent.mkdir(parents=True, exist_ok=True)
         surf.save(out_surf_path)
 

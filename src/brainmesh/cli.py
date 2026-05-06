@@ -266,6 +266,61 @@ def group_regions_main(argv=None):
     print(f"Saved → {args.output}")
 
 
+def plot_mesh_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Render diagnostic views of a marked tet mesh OR its source surface mesh."
+    )
+    parser.add_argument("mesh", help="Marked tetrahedral mesh OR labelled surface mesh (.vtk, .vtu, ...)")
+    parser.add_argument("-o", "--output", default="mesh_plot.png",
+                        help="Output image path (default: mesh_plot.png; format inferred from extension)")
+    parser.add_argument("--label-array", default=None,
+                        help="Cell data array used for region markers "
+                             "(default: 'marker' for tet, 'boundary_labels' for surface)")
+    args = parser.parse_args(argv)
+
+    import pyvista as pv
+    from pyvista import CellType
+    from brainmesh.plotting import plot_surface_mesh, plot_tet_mesh
+
+    mesh = pv.read(args.mesh)
+    if isinstance(mesh, pv.ImageData):
+        plot_tet_mesh(mesh, args.output,
+                      label_array=args.label_array or "data")
+    elif isinstance(mesh, pv.PolyData):
+        plot_surface_mesh(mesh, args.output,
+                          label_array=args.label_array or "boundary_labels")
+    else:
+        # UnstructuredGrid: dispatch by cell type
+        is_tet = bool(set(mesh.celltypes.tolist())
+                      & {int(CellType.TETRA), int(CellType.QUADRATIC_TETRA)})
+        if is_tet:
+            plot_tet_mesh(mesh, args.output,
+                          label_array=args.label_array or "marker")
+        else:
+            plot_surface_mesh(mesh.extract_surface(), args.output,
+                              label_array=args.label_array or "boundary_labels")
+    print(f"Saved → {args.output}")
+
+
+def plot_facets_main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Render diagnostic views of a facet mesh into a single image."
+    )
+    parser.add_argument("facets",
+                        help="Facet mesh from brainmesh-mark-facets / brainmesh-extract-csf")
+    parser.add_argument("-o", "--output", default="facets_plot.png",
+                        help="Output image path (default: facets_plot.png; format inferred from extension)")
+    parser.add_argument("--no-group", action="store_true",
+                        help="Skip grouping by anatomical region")
+    args = parser.parse_args(argv)
+
+    import pyvista as pv
+    from brainmesh.plotting import plot_facet_mesh
+
+    plot_facet_mesh(pv.read(args.facets), args.output, group=not args.no_group)
+    print(f"Saved → {args.output}")
+
+
 def subdivide_SAS(argv=None):
     parser = argparse.ArgumentParser(
         description="Subdivide the SAS by the nearest cortical parcellation label"
