@@ -87,7 +87,7 @@ WM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_WHITE_MATTER,
 GM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_CORTEX, 
                         Label.RIGHT_CEREBELLUM_CORTEX]
 
-
+TISSUE_LABELS = list(set(Label._asdict().values()) - set(VENTRICLE_LABELS + [Label.CSF]))
 
 # groups for csf facet regions
 # ── DK40 aparc parcel → lobe groupings (FreeSurfer label values, pre-SAS-offset) ──
