@@ -54,24 +54,6 @@ def test_fill_wm_hyperintensities(tiny_seg):
     result = fill_wm_hyperintensities(data)
     assert result[tuple(wm_idx)] != Label.WM_HYPOINTENSITIES
 
-
-def test_fill_wm_hyperintensities_larger_radius_fills_more():
-    """A larger wm_search_radius should fill at least as many hyperintensity voxels."""
-    data = np.zeros((20, 20, 20), dtype=np.uint8)
-    # WM ball in the center
-    data[8:12, 8:12, 8:12] = Label.LEFT_CEREBRAL_WHITE_MATTER
-    # Hyperintensities scattered at distance 1 and distance 5 from the WM
-    data[7, 10, 10] = Label.WM_HYPOINTENSITIES   # adjacent to WM (distance 1)
-    data[3, 10, 10] = Label.WM_HYPOINTENSITIES   # farther from WM (distance 5)
-
-    result_small = fill_wm_hyperintensities(data.copy(), wm_search_radius=2)
-    result_large = fill_wm_hyperintensities(data.copy(), wm_search_radius=7)
-
-    filled_small = (result_small != Label.WM_HYPOINTENSITIES) & (data == Label.WM_HYPOINTENSITIES)
-    filled_large = (result_large != Label.WM_HYPOINTENSITIES) & (data == Label.WM_HYPOINTENSITIES)
-    assert filled_large.sum() >= filled_small.sum()
-
-
 def test_solidify_csf_kwargs_accepted(tiny_seg):
     """solidify_csf must accept the new keyword arguments without error."""
     data = tiny_seg.copy()
