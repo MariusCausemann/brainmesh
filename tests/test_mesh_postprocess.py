@@ -133,6 +133,7 @@ def csf_box_mesh():
         Label.CSF,
         Label.LEFT_CEREBRAL_WHITE_MATTER,
     ).astype(np.int32)
+    mesh.field_data["grid_z_normal"] = np.array([0.0, 0.0, 1.0])
     return mesh
 
 
