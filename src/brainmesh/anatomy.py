@@ -9,7 +9,7 @@ from edt import edt
 from nbmorph import dilate_labels_spherical as dilate
 from nbmorph import erode_labels_spherical as erode
 
-from .labels import Label, VENTRICLE_LABELS
+from .labels import Label, VENTRICLE_LABELS, TISSUE_LABELS
 from .decorators import track_voxel_changes, plot_voxel_changes, time_func
 from .segmentation import (
     enforce_csf_around_falx,
@@ -188,12 +188,21 @@ def create_tentorium(
     tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
     tent_mask[data==0] = 0
 
-    tent_mask = morphology.remove_small_objects(tent_mask, max_size=500)
+    tent_mask = morphology.remove_small_objects(tent_mask, max_size=int(tent_mask.sum() * 0.2))
     data[tent_mask] = Label.TENTORIUM
     enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
-    data[(~cer_territory) & (data == Label.FALX)] = Label.CSF
+    data[(~cer_territory) & (phantom_ceb > 0) & (data == Label.FALX)] = Label.CSF
     return data
 
+@track_voxel_changes
+def connect_islands(mask, maxdist=np.inf, radius=1):
+    if mask.sum() == 0: return mask
+    from itertools import combinations
+    labels, N = measure.label(mask, return_num=True)
+    for i,j in combinations(range(1, N+1), r=2):
+        l = _connect_by_line(labels==i, labels==j, radius=radius, maxdist=maxdist)
+        mask[l] = True
+    return mask
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
@@ -204,17 +213,26 @@ def build_inferior_lateral_ventricle_horns(
     post_close_dilation_radius=1,
     smoothing_radius=2,
 ):
+    from .segmentation import fill_from_neighbors
     LV_INF = [Label.LEFT_INFERIOR_LATERAL_VENTRICLE, Label.RIGHT_INFERIOR_LATERAL_VENTRICLE]
     LV = [Label.LEFT_LATERAL_VENTRICLE, Label.RIGHT_LATERAL_VENTRICLE]
     CP = [Label.LEFT_CHOROID_PLEXUS, Label.RIGHT_CHOROID_PLEXUS]
     for LVINFID, LVID, CPID in zip(LV_INF, LV, CP):
         mask = data == LVINFID
+        if mask.sum()==0: continue
+        new_mask = morphology.remove_small_objects(mask, max_size=int(mask.sum() * 0.05))
+        data = fill_from_neighbors(data, mask != new_mask, TISSUE_LABELS)
+        mask = new_mask
+        mask = connect_islands(mask, radius=1, maxdist=20)
+        mask += _connect_by_line(mask, data==LVID, radius=2)
         mask = dilate(
             nbmorph.close_labels_spherical(mask, radius=horn_closing_radius),
             radius=post_close_dilation_radius,
         )
         mask = nbmorph.smooth_labels_spherical(mask, smoothing_radius)
         mask[data == CPID] = 0
+        labels, N = measure.label(mask, return_num=True)
+        assert N == 1
         data[mask] = LVINFID
     return data
 
@@ -226,39 +244,78 @@ def _get_closest_point(a, b):
     return minidx
 
 
-def _connect_by_line(m1, m2, radius=2):
+def _connect_by_line(m1, m2, radius=2, maxdist=np.inf):
     pointa = _get_closest_point(m1, m2)
     pointb = _get_closest_point(m2, m1)
+    if np.linalg.norm(np.array(pointa) - np.array(pointb)) > maxdist:
+        print(f"maxdist exceeded: {np.array(pointa) - np.array(pointb)}")
+        return np.full_like(m1, False, dtype=bool)
+
     line = np.array(skimage.draw.line_nd(pointa, pointb, endpoint=True))
     conn = np.zeros_like(m1)
     i, j, k = line
     conn[i, j, k] = 1
     return dilate(conn, radius=radius, struct_sequence="B")
 
+@track_voxel_changes
+def solidify_label(data, ID, closing_radius=0, smoothing_radius=0,
+                max_island_size=None, max_connection_dist=10,
+                connect=True, neighbor_labels=TISSUE_LABELS):
+    from .segmentation import fill_from_neighbors
+
+    old_mask = (data == ID)
+    if max_island_size is None:
+        max_island_size=int(old_mask.sum() * 0.05)
+    mask = morphology.remove_small_objects(old_mask.copy(),
+                                            max_size=max_island_size)
+    print(f"found small objects: {(mask != old_mask).sum()} voxels")
+    if connect:
+        mask = connect_islands(mask, radius=1, maxdist=max_connection_dist)
+    if closing_radius:
+        mask = nbmorph.close_labels_spherical(mask, radius=closing_radius)
+    if smoothing_radius:
+        mask = nbmorph.smooth_labels_spherical(mask, smoothing_radius)
+    data = fill_from_neighbors(data, mask != old_mask, neighbor_labels)
+    data[mask] = ID
+    return data
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-def enforce_connected_ventricles(data, connection_radius=2, mask_smoothing_radius=2):
+def enforce_connected_ventricles(data, connection_radius=2):
+    from .labels import reverse_label_map
+    # make sure all parts of each part of the ventricles is connected
+    for v_id in VENTRICLE_LABELS:
+        print(f"solidifying {reverse_label_map[v_id]}")
+        is_CP = v_id==Label.LEFT_CHOROID_PLEXUS or v_id==Label.RIGHT_CHOROID_PLEXUS
+        data = solidify_label(data, v_id, connect=~is_CP,
+                               neighbor_labels=TISSUE_LABELS + VENTRICLE_LABELS)
+
+    # make sure the AQ (between V3 and V4) is there
     V4_mask = data == Label.FOURTH_VENTRICLE
     V3_mask = data == Label.THIRD_VENTRICLE
     aq_conn = _connect_by_line(V3_mask, V4_mask, radius=connection_radius)
     data[aq_conn] = Label.FOURTH_VENTRICLE
 
+    # make sure the LVs are connected to V3
     RLV_mask = data == Label.RIGHT_LATERAL_VENTRICLE
     LLV_mask = data == Label.LEFT_LATERAL_VENTRICLE
     fm_conn = _connect_by_line(V3_mask, RLV_mask, radius=connection_radius)
     fm_conn += _connect_by_line(V3_mask, LLV_mask, radius=connection_radius)
     data[fm_conn] = Label.THIRD_VENTRICLE
+
+    # test whether all parts are connected
     label, num_features = measure.label(np.isin(data, VENTRICLE_LABELS),
                                          connectivity=2, return_num=True)
     if num_features > 1:
         import pyvista as pv
+        import os
         grid = pv.ImageData(dimensions=[i + 1 for i in data.shape])
         data[~np.isin(data, VENTRICLE_LABELS)] = 0
         grid.cell_data["data"] = data.flatten(order="F")
         grid.cell_data["label"] = label.flatten(order="F")
-        debug_name = f"ventricles_{np.random.randint(low=0, high=10000)}.vti"
+        os.makedirs("debug", exist_ok=True)
+        debug_name = f"debug/ventricles_{np.random.randint(low=0, high=10000)}.vti"
         grid.save(debug_name)
         print(f"enforcing connected ventricles failed. See {debug_name}.")
         assert num_features ==1
