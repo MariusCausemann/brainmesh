@@ -3,6 +3,7 @@
 from .labels import (Label, reverse_label_map, VENTRICLE_LABELS,
                      GM_LABELS, WM_LABELS,
                      GM_CEREBELLUM_LABELS, WM_CEREBELLUM_LABELS,
+                     TISSUE_LABELS,
                      SAS_LABEL_OFFSET, SPINAL_ID,
                      fs_aparc_to_sas_marker, sas_marker_to_fs_aparc)
 from .io import nibabel_to_pyvista, upsample_nib, get_img
