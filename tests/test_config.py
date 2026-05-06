@@ -12,7 +12,6 @@ from brainmesh.config import (
     ExtendBrainstemCaudallyCfg,
     ConnectedVentriclesCfg,
     SolidifyCSFCfg,
-    FillWMHyperCfg,
     ExtendBrainstemCfg,
     InfLatVentHornsCfg,
     PipelineMiscCfg,
@@ -57,7 +56,6 @@ class TestDefaults:
     def test_connected_ventricles_defaults(self):
         cfg = SegmentationConfig()
         assert cfg.connected_ventricles.connection_radius == 2
-        assert cfg.connected_ventricles.mask_smoothing_radius == 2
 
     def test_misc_defaults(self):
         cfg = SegmentationConfig()
@@ -70,10 +68,6 @@ class TestDefaults:
         cfg = SegmentationConfig()
         assert cfg.solidify_csf.mask_closing_radius == 5
         assert cfg.solidify_csf.mask_closing_iterations == 1
-
-    def test_fill_wm_hyper_defaults(self):
-        cfg = SegmentationConfig()
-        assert cfg.fill_wm_hyperintensities.wm_search_radius == 6
 
     def test_coarsen_surface_defaults(self):
         cfg = SegmentationConfig()
