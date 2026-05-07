@@ -115,7 +115,7 @@ def create_falx(
     falx_mask += dilate(~right_territory, radius=boundary_thickness_radius) ^ (~right_territory)
 
     falx_mask[~dilate(right_mask | left_mask, radius=cerebrum_proximity_radius)] = 0
-    falx_mask[~nbmorph.close_labels_spherical(data > 0, radius=1)] = 0
+    falx_mask[~nbmorph.dilate_labels_spherical(data > 0, radius=1)] = 0
 
     cc_interface = (
         dilate(data == Label.LEFT_CEREBRAL_WHITE_MATTER, radius=2)
