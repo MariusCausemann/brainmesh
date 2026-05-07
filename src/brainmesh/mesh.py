@@ -566,6 +566,11 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     z_mask = projections <= min_proj + max_distance
 
     spinal_mask = csf_mask & normal_mask & z_mask
+
+    surf = _build_facet_polydata(mesh, faces, {"boundary": spinal_mask})
+    surf = smooth_cell_labels(surf, "boundary", target_labels=[False, True])
+    spinal_mask = surf["boundary"]
+
     spinal_faces = faces[spinal_mask]
     spinal_boundary = boundary[spinal_mask]
 
@@ -586,7 +591,6 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
         spinal_boundary = spinal_boundary[keep_ids]
 
     return _build_facet_polydata(mesh, spinal_faces, {"boundary": spinal_boundary})
-
 
 def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
                 encoding_base=100000, smooth_sas_labels=False,

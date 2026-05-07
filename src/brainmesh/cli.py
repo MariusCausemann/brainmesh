@@ -138,8 +138,8 @@ def mark_facets_main(argv=None):
                         help="Output file for combined facet mesh (default: facets.vtk)")
     parser.add_argument("--label-array", default="marker",
                         help="Cell data array used for region markers (default: marker)")
-    parser.add_argument("--max-angle", type=float, default=10.0,
-                        help="Max angle (degrees) from downward for spinal boundary detection (default: 10)")
+    parser.add_argument("--max-angle", type=float, default=20.0,
+                        help="Max angle (degrees) from downward for spinal boundary detection (default: 20)")
     parser.add_argument("--max-distance", type=float, default=0.5,
                         help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
     parser.add_argument("--no-smooth-sas-labels", action="store_true",
