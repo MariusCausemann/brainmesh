@@ -66,7 +66,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     if cfg.misc.apply_mode_box_pre:
         data = nbm.mode_box(data)
         data[~orig_mask] = 0
-        
+    assert data.dtype == np.uint8 
     data = create_falx(data, **asdict(cfg.falx))
     data = create_tentorium(data, **asdict(cfg.tentorium))
     # connect (often disconnected) inf. lateral ventricle horns with
@@ -88,11 +88,12 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     if cfg.misc.apply_mode_diamond_post:
         data = nbm.mode_diamond(data)
     data[~orig_mask] = 0
-
+    assert data.dtype == np.uint8
     data = enforce_csf_around_tentorium(data, **asdict(cfg.csf_around_tentorium))
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))
     data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
+    assert data.dtype == np.uint8
     seg_out = nib.Nifti1Image(data, seg.affine)
     
     # We still need the grid for surface extraction

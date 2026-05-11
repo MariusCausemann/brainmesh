@@ -1,9 +1,11 @@
 """Unit tests for voxel-label segmentation operations."""
 import numpy as np
 import pytest
+import scipy.ndimage as ndi
 
 from brainmesh import Label
 from brainmesh.segmentation import (
+    binary_fill_holes,
     close_csf_space,
     cut_bottom,
     enforce_csf_layer,
@@ -69,3 +71,82 @@ def test_solidify_csf_larger_radius_fills_more(tiny_seg):
     csf_small = (result_small == Label.CSF).sum()
     csf_large = (result_large == Label.CSF).sum()
     assert csf_large >= csf_small
+
+
+# ---------------------------------------------------------------------------
+# binary_fill_holes — compare against scipy.ndimage.binary_fill_holes
+# ---------------------------------------------------------------------------
+def _scipy_fill_6conn(img):
+    """scipy reference with the same 6-connectivity used by brainmesh."""
+    structure = ndi.generate_binary_structure(3, 1)  # 6-connectivity in 3D
+    return ndi.binary_fill_holes(img, structure=structure)
+
+
+def test_binary_fill_holes_empty_volume():
+    img = np.zeros((5, 6, 7), dtype=bool)
+    np.testing.assert_array_equal(binary_fill_holes(img), img)
+
+
+def test_binary_fill_holes_full_volume():
+    img = np.ones((4, 5, 6), dtype=bool)
+    np.testing.assert_array_equal(binary_fill_holes(img), img)
+
+
+def test_binary_fill_holes_no_holes():
+    """A foreground blob with no interior holes must be returned unchanged."""
+    img = np.zeros((10, 10, 10), dtype=bool)
+    img[2:8, 2:8, 2:8] = True
+    np.testing.assert_array_equal(binary_fill_holes(img), img)
+
+
+def test_binary_fill_holes_single_hole():
+    img = np.zeros((10, 10, 10), dtype=bool)
+    img[2:8, 2:8, 2:8] = True
+    img[4, 4, 4] = False  # single interior hole
+    out = binary_fill_holes(img)
+    expected = img.copy()
+    expected[4, 4, 4] = True
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_binary_fill_holes_hole_touching_boundary_not_filled():
+    """A "hole" that connects to the outside through 6-connectivity should not
+    be filled — it isn't enclosed."""
+    img = np.zeros((10, 10, 10), dtype=bool)
+    img[2:8, 2:8, 2:8] = True
+    # Tunnel the hole all the way out through a face
+    img[3:8, 4, 4] = False  # carves a channel from the +x face inward
+    np.testing.assert_array_equal(binary_fill_holes(img), img)
+
+
+def test_binary_fill_holes_matches_scipy_simple():
+    img = np.zeros((12, 12, 12), dtype=bool)
+    img[2:10, 2:10, 2:10] = True
+    img[5, 5, 5] = False
+    img[6, 7, 4:6] = False
+    np.testing.assert_array_equal(binary_fill_holes(img), _scipy_fill_6conn(img))
+
+
+def test_binary_fill_holes_matches_scipy_random():
+    rng = np.random.default_rng(7)
+    # Build a connected hollow shell with random interior holes inside.
+    img = np.zeros((15, 16, 17), dtype=bool)
+    img[2:13, 2:14, 2:15] = True
+    interior = np.zeros_like(img)
+    interior[5:10, 5:10, 5:10] = rng.random((5, 5, 5)) > 0.5
+    img &= ~interior
+    np.testing.assert_array_equal(binary_fill_holes(img), _scipy_fill_6conn(img))
+
+
+def test_binary_fill_holes_hollow_sphere(tiny_seg):
+    """The CSF/WM-shell fixture has WM enclosed by CSF; punching a hole inside
+    WM should be re-filled."""
+    mask = tiny_seg > 0
+    # Carve a single-voxel hole well inside the WM core
+    wm_idx = np.argwhere(tiny_seg == Label.LEFT_CEREBRAL_WHITE_MATTER)
+    center = wm_idx[len(wm_idx) // 2]
+    mask[tuple(center)] = False
+    filled = binary_fill_holes(mask)
+    assert filled[tuple(center)]
+    # Whole-volume agreement with scipy
+    np.testing.assert_array_equal(filled, _scipy_fill_6conn(mask))

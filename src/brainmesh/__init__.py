@@ -46,6 +46,8 @@ from .mesh import (
 from .phantom import make_phantom_seg
 from .config import SegmentationConfig
 
+from .ccl import remove_small_objects, ccl_3d_26conn
+
 __all__ = [
     "Label",
     "VENTRICLE_LABELS",
