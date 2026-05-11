@@ -137,17 +137,34 @@ def load_marked_mesh(path, label_array="marker"):
     return mesh
 
 
-def filter_by_label(mesh, labels, label_array="marker"):
+def filter_by_mask(mesh, mask):
     """
-    Extract the subset of cells whose ``label_array`` value is in ``labels``.
-
-    The returned UnstructuredGrid has its own (reduced) point array — use
-    :func:`mark_interface_facets` / :func:`mark_boundary_facets` afterwards
-    if you need a facet mesh referencing those points.
+    Extract the subset of cells with mask,
+    while strictly preserving the original point array.
     """
-    labels = np.atleast_1d(labels)
-    mask = np.isin(np.asarray(mesh.cell_data[label_array]), labels)
-    return mesh.extract_cells(mask)
+    # Check if the mesh is homogeneous (every cell takes up the same flat length)
+    if not isinstance(mesh, pv.UnstructuredGrid):
+        mesh = mesh.cast_to_unstructured_grid()
+    if len(mesh.cells) % mesh.n_cells != 0:
+        raise ValueError("Mesh contains mixed cell types. Cannot use 2D reshape method.")
+    
+    # Number of integers each cell takes up (e.g., 5 for linear tets: [4, p1, p2, p3, p4])
+    stride = len(mesh.cells) // mesh.n_cells
+    
+    # Reshape, apply the mask to the rows, and flatten back to 1D
+    cells_2d = mesh.cells.reshape(mesh.n_cells, stride)
+    new_cells = cells_2d[mask].flatten()
+    
+    new_celltypes = mesh.celltypes[mask]
+    
+    # Rebuild the grid forcing it to use the full, unpruned points array
+    retained_mesh = pv.UnstructuredGrid(new_cells, new_celltypes, mesh.points)
+    
+    # Transfer the cell data over
+    for name in mesh.cell_data:
+        retained_mesh.cell_data[name] = mesh.cell_data[name][mask]
+        
+    return retained_mesh
 
 
 def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs):
@@ -179,22 +196,48 @@ def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs)
     all_markers = np.asarray(mesh.cell_data[label_array])
     sas_labels = np.unique(all_markers[all_markers > SAS_LABEL_OFFSET]).tolist()
     csf_labels = list(VENTRICLE_LABELS) + [Label.CSF] + sas_labels
-    csf_mesh = filter_by_label(mesh, csf_labels, label_array=label_array)
+    csf_mesh = filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))
 
     if not return_facets:
-        return csf_mesh
+        return csf_mesh.clean()
 
     # Compute facets on the full mesh (preserves CSF-to-tissue interface IDs),
     # then keep facets whose interface_id involves a CSF marker. Operates purely
     # on cell data, so this works for both linear and quadratic tet meshes.
     full_facets = mark_facets(mesh, label_array=label_array, **facet_kwargs)
+    assert np.allclose(full_facets.points, mesh.points)
     encoding_base = facet_kwargs.get("encoding_base", 100000)
     ids = np.asarray(full_facets.cell_data["interface_id"])
     a, b = np.divmod(ids, encoding_base)  # boundary: a=0, b=id; interface: (min,max)
     csf_arr = np.asarray(csf_labels)
     mask = np.isin(a, csf_arr) | np.isin(b, csf_arr) | (ids == SPINAL_ID)
-    csf_facets = full_facets.extract_cells(mask)
-    return csf_mesh, csf_facets
+
+    csf_facets = filter_by_mask(full_facets, mask)
+
+    combined_cells = np.concatenate([csf_mesh.cells, csf_facets.cells])
+    combined_types = np.concatenate([csf_mesh.celltypes, csf_facets.celltypes])
+
+    # 2. Create the massive combined grid sharing the parent points
+    combined_grid = pv.UnstructuredGrid(combined_cells, combined_types, mesh.points)
+
+    # 3. Let PyVista/VTK clean it (removes all rest-of-body points and remaps IDs automatically)
+    cleaned_grid = combined_grid.clean()
+
+    # 4. Split them back apart! 
+    # Since clean() doesn't reorder cells, the flat array splits exactly at the original length
+    split_idx = len(csf_mesh.cells)
+
+    final_tets_cells = cleaned_grid.cells[:split_idx]
+    final_tris_cells = cleaned_grid.cells[split_idx:]
+
+    # 5. Reconstruct the final, separated meshes using the newly cleaned shared point array
+    csf_mesh_cleaned = pv.UnstructuredGrid(final_tets_cells, csf_mesh.celltypes, cleaned_grid.points)
+    csf_facets_cleaned = pv.UnstructuredGrid(final_tris_cells, csf_facets.celltypes, cleaned_grid.points)
+
+    csf_mesh_cleaned.cell_data[label_array] = csf_mesh.cell_data[label_array]
+    csf_facets_cleaned.cell_data["interface_id"] = csf_facets.cell_data["interface_id"]
+    assert np.allclose(csf_mesh_cleaned.points, csf_facets_cleaned.points)
+    return csf_mesh_cleaned, csf_facets_cleaned
 
 
 def mark_between_regions(ids_a, ids_b, da, db, seg, label_array):

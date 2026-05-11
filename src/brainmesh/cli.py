@@ -227,6 +227,8 @@ def extract_csf_main(argv=None):
         smooth_sas_labels=not args.no_smooth_sas_labels,
         ignore_sas_interfaces=not args.keep_sas_interfaces,
     )
+
+    assert np.allclose(csf_mesh.points, facets.points)
     csf_mesh.save(args.output)
     facets.save(args.facets)
 

@@ -6,7 +6,6 @@ import pytest
 from brainmesh import Label
 from brainmesh.mesh import (
     extract_csf,
-    filter_by_label,
     mark_boundary_facets,
     mark_interface_facets,
     mark_spinal_boundary,
@@ -39,17 +38,6 @@ def test_split_box_has_many_tets(split_box_mesh):
     assert split_box_mesh.n_cells > 100
     types = np.unique(split_box_mesh.celltypes)
     assert types.tolist() == [pv.CellType.TETRA]
-
-
-@pytest.mark.slow
-def test_filter_by_label_partitions_mesh(split_box_mesh):
-    n_total = split_box_mesh.n_cells
-    left = filter_by_label(split_box_mesh, 10)
-    right = filter_by_label(split_box_mesh, 20)
-    assert left.n_cells > 0 and right.n_cells > 0
-    assert left.n_cells + right.n_cells == n_total
-    assert np.all(left.cell_data["marker"] == 10)
-    assert np.all(right.cell_data["marker"] == 20)
 
 
 def test_extract_csf_picks_csf_and_ventricles():
