@@ -6,7 +6,7 @@ from .labels import (Label, reverse_label_map, VENTRICLE_LABELS,
                      TISSUE_LABELS,
                      SAS_LABEL_OFFSET, SPINAL_ID,
                      fs_aparc_to_sas_marker, sas_marker_to_fs_aparc)
-from .io import nibabel_to_pyvista, upsample_nib, get_img
+from .io import nibabel_to_pyvista, read_mesh, save_mesh, upsample_nib, get_img
 from .segmentation import (
     solidify_csf,
     close_csf_space,
@@ -43,10 +43,9 @@ from .mesh import (
     mark_spinal_boundary,
     mark_facets,
 )
+from .mesh_optimizer import run_mesh_optimization
 from .phantom import make_phantom_seg
 from .config import SegmentationConfig
-
-from .ccl import remove_small_objects, ccl_3d_26conn
 
 __all__ = [
     "Label",
@@ -56,6 +55,8 @@ __all__ = [
     "fs_aparc_to_sas_marker",
     "sas_marker_to_fs_aparc",
     "nibabel_to_pyvista",
+    "read_mesh",
+    "save_mesh",
     "upsample_nib",
     "solidify_csf",
     "close_csf_space",

@@ -1,6 +1,6 @@
 """Command-line entry points for brainmesh pipelines."""
 import argparse
-
+from pathlib import Path
 
 def surface_main(argv=None):
     parser = argparse.ArgumentParser(
@@ -102,15 +102,16 @@ def curve_mesh_main(argv=None):
                              " minimum quality (default: 0.8)")
     args = parser.parse_args(argv)
 
-    import pyvista as pv
     from brainmesh.curved_mesh import (
         adaptive_snap_boundaries,
         convert_to_quadratic,
         print_quality_stats,
     )
+    from .mesh_optimizer import run_mesh_optimization
+    from brainmesh.io import read_mesh, save_mesh
 
-    input_mesh = pv.read(args.input)
-    target_surface = pv.read(args.target)
+    input_mesh = read_mesh(args.input)
+    target_surface = read_mesh(args.target)
 
     print_quality_stats(input_mesh, "1. Original Linear Mesh")
 
@@ -121,11 +122,25 @@ def curve_mesh_main(argv=None):
     orig_q = print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
 
     print("Snapping boundary nodes to target surface...")
-    adaptive_snap_boundaries(quad_mesh, target_surface,
-                              min_quality=orig_q.min() * args.min_quality_factor)
+    all_boundary_ids = adaptive_snap_boundaries(quad_mesh, target_surface,
+                              min_quality=orig_q.min() * args.min_quality_factor,
+                              decay_step=0.1)
     print_quality_stats(quad_mesh, "3. Snapped Quadratic Mesh")
 
-    quad_mesh.save(args.output)
+    print("Optimizing Internal Nodes...")
+
+    # Pass the mesh and the boundary IDs to freeze
+    quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=all_boundary_ids, iters=20,
+                                      target_quality=0.2, step_factor=0.1)
+
+    print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
+
+    #quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=[], iters=2,
+    #                                  target_quality=0.08, step_factor=0.1)
+
+    #print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
+
+    save_mesh(quad_mesh, args.output)
     print(f"Success! Snapped mesh saved to: {args.output}")
 
 
@@ -148,15 +163,15 @@ def mark_facets_main(argv=None):
                         help="Keep interfaces between SAS subdivision regions (dropped by default)")
     args = parser.parse_args(argv)
 
-    import pyvista as pv
+    from brainmesh.io import read_mesh, save_mesh
     from brainmesh.mesh import mark_facets
 
-    mesh = pv.read(args.mesh)
+    mesh = read_mesh(args.mesh)
     combined = mark_facets(mesh, label_array=args.label_array,
                            max_angle=args.max_angle, max_distance=args.max_distance,
                            smooth_sas_labels=not args.no_smooth_sas_labels,
                            ignore_sas_interfaces=not args.keep_sas_interfaces)
-    combined.save(args.output)
+    save_mesh(combined, args.output)
     import numpy as np
     from brainmesh.labels import SPINAL_ID
     ids = combined.cell_data["interface_id"]
@@ -177,13 +192,13 @@ def remark_sas_main(argv=None):
     args = parser.parse_args(argv)
 
     import numpy as np
-    import pyvista as pv
+    from brainmesh.io import read_mesh, save_mesh
     from brainmesh.labels import Label
     from brainmesh.mesh import remark_csf_with_sas
 
-    mesh = pv.read(args.mesh)
+    mesh = read_mesh(args.mesh)
     remark_csf_with_sas(mesh, args.sas, label_array=args.label_array)
-    mesh.save(args.output)
+    save_mesh(mesh, args.output)
 
     markers = mesh.cell_data[args.label_array]
     n_csf = (markers == Label.CSF).sum()
@@ -213,11 +228,11 @@ def extract_csf_main(argv=None):
     args = parser.parse_args(argv)
 
     import numpy as np
-    import pyvista as pv
+    from brainmesh.io import read_mesh, save_mesh
     from brainmesh.labels import SPINAL_ID
     from brainmesh.mesh import extract_csf
 
-    mesh = pv.read(args.mesh)
+    mesh = read_mesh(args.mesh)
     csf_mesh, facets = extract_csf(
         mesh,
         label_array=args.label_array,
@@ -229,8 +244,8 @@ def extract_csf_main(argv=None):
     )
 
     assert np.allclose(csf_mesh.points, facets.points)
-    csf_mesh.save(args.output)
-    facets.save(args.facets)
+    save_mesh(csf_mesh, args.output)
+    save_mesh(facets, args.facets)
 
     ids = facets.cell_data["interface_id"]
     print(f"CSF mesh: {csf_mesh.n_cells} tets → {args.output}")
@@ -244,7 +259,7 @@ def group_regions_main(argv=None):
         description="Group CSF facets into anatomical regions (lobes, tentorium, sagittal sinus, …)."
     )
     parser.add_argument("mesh", help="Marked facet mesh (.vtk, .vtu, ...)")
-    parser.add_argument("-o", "--output", default="csf_facets_regions.vtk",
+    parser.add_argument("-o", "--output", default="csf_facets_regions.vtk", type=Path,
                         help="Output path (default: csf_facets_regions.vtk)")
     parser.add_argument("--label-array", default="marker",
                         help="Cell data array used for region markers (default: marker)")
@@ -252,19 +267,19 @@ def group_regions_main(argv=None):
                         help="Disable majority-vote smoothing of SAS boundary labels")
     args = parser.parse_args(argv)
 
-    import pyvista as pv
-    from brainmesh.mesh import CSF_REGION_NAMES, group_csf_facets_by_region
-
-    facets = pv.read(args.mesh)
-    result = group_csf_facets_by_region(facets)
-    result.save(args.output)
-
+    from brainmesh.io import read_mesh, save_mesh
+    from brainmesh.mesh import group_csf_facets_by_region
     import numpy as np
-    counts = dict(zip(*np.unique(result.cell_data["region"], return_counts=True)))
-    for rid, name in enumerate(CSF_REGION_NAMES):
-        n = counts.get(rid, 0)
-        if n:
-            print(f"  {name:30s} ({rid}) {n:6d}")
+    import tomlkit
+    
+    facets = read_mesh(args.mesh)
+    result, region_label_dict = group_csf_facets_by_region(facets)
+    assert np.allclose(facets.points, result.points)
+    save_mesh(result, args.output)
+    label_path = args.output.with_name(f"{args.output.stem}_labels").with_suffix(".toml")
+    with open(label_path, "w", encoding="utf-8") as f:
+        tomlkit.dump(region_label_dict, f)
+
     print(f"Saved → {args.output}")
 
 
@@ -282,9 +297,10 @@ def plot_mesh_main(argv=None):
 
     import pyvista as pv
     from pyvista import CellType
+    from brainmesh.io import read_mesh
     from brainmesh.plotting import plot_surface_mesh, plot_tet_mesh
 
-    mesh = pv.read(args.mesh)
+    mesh = read_mesh(args.mesh)
     if isinstance(mesh, pv.ImageData):
         plot_tet_mesh(mesh, args.output,
                       label_array=args.label_array or "data")
@@ -308,18 +324,33 @@ def plot_facets_main(argv=None):
     parser = argparse.ArgumentParser(
         description="Render diagnostic views of a facet mesh into a single image."
     )
-    parser.add_argument("facets",
+    parser.add_argument("facets", type=Path,
                         help="Facet mesh from brainmesh-mark-facets / brainmesh-extract-csf")
     parser.add_argument("-o", "--output", default="facets_plot.png",
                         help="Output image path (default: facets_plot.png; format inferred from extension)")
     parser.add_argument("--no-group", action="store_true",
                         help="Skip grouping by anatomical region")
+    parser.add_argument("--labels", type=Path, default=None,
+                        help="TOML file mapping {region_name: id} for the legend. "
+                             "Defaults to '<facets>_labels.toml' next to the facets file.")
     args = parser.parse_args(argv)
 
-    import pyvista as pv
+    import tomlkit
+    from brainmesh.io import read_mesh
     from brainmesh.plotting import plot_facet_mesh
 
-    plot_facet_mesh(pv.read(args.facets), args.output, group=not args.no_group)
+    labels_path = args.labels or args.facets.with_name(
+        f"{args.facets.stem}_labels"
+    ).with_suffix(".toml")
+    region_labels = None
+    if labels_path.exists():
+        with open(labels_path, "r", encoding="utf-8") as f:
+            region_labels = dict(tomlkit.load(f))
+    elif args.labels is not None:
+        parser.error(f"Labels file not found: {labels_path}")
+
+    plot_facet_mesh(read_mesh(args.facets), args.output,
+                    group=not args.no_group, region_labels=region_labels)
     print(f"Saved → {args.output}")
 
 
