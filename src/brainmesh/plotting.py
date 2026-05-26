@@ -150,7 +150,7 @@ def _add_categorical(p, mesh, scalars_arr, lookup, cmap, **kwargs):
 
 
 def _compose(panels, output, ncols, legend=None,
-             suptitle=None):
+             suptitle=None, legend_bbox_y=0):
     """panels: list of (img, title). legend: optional list of (label, color)."""
     nrows = int(np.ceil(len(panels) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows),
@@ -169,8 +169,9 @@ def _compose(panels, output, ncols, legend=None,
         handles = [Patch(facecolor=c, edgecolor="black", label=l) for l, c in legend]
         ncol = min(len(legend), 4)
         fig.legend(handles=handles, loc="lower center", ncol=ncol,
-                   frameon=False, bbox_to_anchor=(0.5, -0.18), fontsize=9,
-                   columnspacing=1.0, handlelength=1.0, handletextpad=0.4)
+                   frameon=False, bbox_to_anchor=(0.5, legend_bbox_y), fontsize=9,
+                   columnspacing=1.2, handlelength=1.2, handleheight=1.1,
+                   handletextpad=0.5)
         fig.subplots_adjust(bottom=0.05)
     if suptitle: fig.suptitle(suptitle, y=0.95)
     fig.savefig(output, dpi=150, bbox_inches="tight", pad_inches=0.1)
@@ -293,10 +294,14 @@ def plot_tet_mesh(mesh, output, label_array="marker"):
         legend.append(("CSF / SAS", CSF_COLOR))
 
     if mesh.celltypes[0] in [10, 24]:
-        num_corner_points = np.unique(mesh.cells.reshape(-1, 11)[:, 1:5]).size
-        cell_type = "quadratic tetrahedra" if mesh.celltypes[0] == 24 else "linear tetrahedra"
+        if mesh.celltypes[0] == 24:
+            num_corner_points = np.unique(mesh.cells.reshape(-1, 11)[:, 1:5]).size
+            cell_type = "quadratic tetrahedra"  
+        else : 
+            num_corner_points = mesh.n_points
+            cell_type ="linear tetrahedra"
         suptitle = f"#cells: {mesh.n_cells:,}, #vertices: {num_corner_points:,}, cell type: {cell_type}"
-    _compose(panels, output, ncols=3, legend=legend, suptitle=suptitle)
+    _compose(panels, output, ncols=3, legend=legend, suptitle=suptitle, legend_bbox_y=-0.18)
 
 
 def plot_surface_mesh(surf, output, label_array="boundary_labels"):
@@ -431,15 +436,18 @@ def plot_surface_mesh(surf, output, label_array="boundary_labels"):
         legend.append(("CSF / SAS", CSF_COLOR))
 
     suptitle = f"#triangles: {surf.n_cells:,}, #vertices: {surf.n_points:,}"
-    _compose(panels, output, ncols=3, legend=legend, suptitle=suptitle)
+    _compose(panels, output, ncols=3, legend=legend, suptitle=suptitle, legend_bbox_y=-0.18)
 
 
-def plot_facet_mesh(facets, output, group=True):
-    """Render a 6-panel diagnostic figure of a facet mesh."""
-    from cmap import Colormap
+def plot_facet_mesh(facets, output, group=True, region_labels=None):
+    """Render a 6-panel diagnostic figure of a facet mesh.
 
+    region_labels: optional {name: id} mapping (e.g. loaded from the
+    ``*_labels.toml`` written by ``brainmesh-group-regions``). Used to build
+    the legend when ``group=True``.
+    """
     if group and "region" not in facets.cell_data:
-        facets = group_csf_facets_by_region(facets)
+        facets, region_labels = group_csf_facets_by_region(facets)
 
     facets = facets.extract_cells(facets.cell_data["interface_id"] < 100000)
     panels = []
@@ -450,7 +458,8 @@ def plot_facet_mesh(facets, output, group=True):
         marker = np.asarray(facets.cell_data["interface_id"])
 
     marker_unique = np.unique(marker)
-    cmap = ListedColormap(list(Colormap("glasbey:glasbey").iter_colors(len(marker_unique))))
+    base = plt.get_cmap("tab20")
+    cmap = ListedColormap([base(i % base.N) for i in range(len(marker_unique))])
 
     def grouped_cb(p, facets=facets, marker=marker):
         _add_categorical(p, facets, marker, marker_unique, cmap)
@@ -458,5 +467,10 @@ def plot_facet_mesh(facets, output, group=True):
     for title, cpos in _anatomical_views(facets.bounds):
         panels.append((_render(grouped_cb, cpos=cpos), title))
 
+    legend = None
+    if group and region_labels:
+        id_to_name = {int(v): str(k) for k, v in region_labels.items()}
+        legend = [(id_to_name.get(int(m), str(int(m))), cmap(i))
+                  for i, m in enumerate(marker_unique)]
 
-    _compose(panels, output, ncols=3)
+    _compose(panels, output, ncols=3, legend=legend, legend_bbox_y=-0.1)
