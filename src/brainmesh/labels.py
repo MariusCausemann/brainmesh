@@ -101,15 +101,15 @@ def _sas_lh(fs_set): return list(l + SAS_LABEL_OFFSET for l in fs_set)
 def _sas_rh(fs_set): return list(l + 1000 + SAS_LABEL_OFFSET for l in fs_set)
 
 region_dict = dict(
-_SAS_LH_FRONTAL   = _sas_lh(_LH_FRONTAL_FS),
-_SAS_RH_FRONTAL   = _sas_rh(_LH_FRONTAL_FS),
-_SAS_LH_PARIETAL  = _sas_lh(_LH_PARIETAL_FS),
-_SAS_RH_PARIETAL  = _sas_rh(_LH_PARIETAL_FS),
-_SAS_LH_TEMPORAL  = _sas_lh(_LH_TEMPORAL_FS),
-_SAS_RH_TEMPORAL  = _sas_rh(_LH_TEMPORAL_FS),
-_SAS_LH_OCCIPITAL = _sas_lh(_LH_OCCIPITAL_FS),
-_SAS_RH_OCCIPITAL = _sas_rh(_LH_OCCIPITAL_FS),
-_SAS_ANTERIOR_SKULL_BASE = list(l + SAS_LABEL_OFFSET for l in [28, 60, 1014, 2014, 1006, 2006]),
-_SAS_INFRATENTORIAL = list(l + SAS_LABEL_OFFSET for l in [6,7,8, 45,46,47, 16]),
+LEFT_FRONTAL_LOBE   = _sas_lh(_LH_FRONTAL_FS),
+RIGHT_FRONTAL_LOBE   = _sas_rh(_LH_FRONTAL_FS),
+LEFT_PARIETAL_LOBE  = _sas_lh(_LH_PARIETAL_FS),
+RIGHT_PARIETAL_LOBE  = _sas_rh(_LH_PARIETAL_FS),
+LEFT_TEMPORAL_LOBE  = _sas_lh(_LH_TEMPORAL_FS),
+RIGHT_TEMPORAL_LOBE  = _sas_rh(_LH_TEMPORAL_FS),
+LEFT_OCCIPITAL_LOBE = _sas_lh(_LH_OCCIPITAL_FS),
+RIGHT_OCCIPITAL_LOBE = _sas_rh(_LH_OCCIPITAL_FS),
+ANTERIOR_SKULL_BASE = list(l + SAS_LABEL_OFFSET for l in [28, 60, 1014, 2014, 1006, 2006]),
+INFRATENTORIAL = list(l + SAS_LABEL_OFFSET for l in [6,7,8, 45,46,47, 16]),
 )
 
