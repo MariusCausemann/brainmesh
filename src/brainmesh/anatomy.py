@@ -14,7 +14,7 @@ from .segmentation import (
     separate_labels,
     get_lowest_point,
 )
-from .ccl import label, remove_small_objects
+import cc3d
 
 
 @njit(cache=True, parallel=True)
@@ -130,7 +130,7 @@ def create_falx(
     cerebellum_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_CORTEX])
     falx_mask[dilate(cerebellum_mask, radius=cerebellum_clearance_radius)] = 0
     falx_mask[dilate(data == Label.THIRD_VENTRICLE, radius=third_ventricle_clearance_radius)] = 0
-    falx_mask = remove_small_objects(falx_mask, max_size=500)
+    falx_mask = cc3d.dust(falx_mask, threshold=500, connectivity=6)
 
     data[falx_mask] = Label.FALX
     enforce_csf_around_falx(data, radius=surrounding_csf_radius)
@@ -184,7 +184,7 @@ def create_tentorium(
     tent_mask = dilate(tent_mask, radius=mask_thickening_radius)
     tent_mask[data==0] = 0
 
-    tent_mask = remove_small_objects(tent_mask, max_size=int(tent_mask.sum() * 0.2))
+    tent_mask = cc3d.dust(tent_mask, threshold=int(tent_mask.sum() * 0.2), connectivity=6)
     data[tent_mask] = Label.TENTORIUM
     enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
     data[(~cer_territory) & (phantom_ceb > 0) & (data == Label.FALX)] = Label.CSF
@@ -194,7 +194,7 @@ def create_tentorium(
 def connect_islands(mask, maxdist=np.inf, radius=1):
     if mask.sum() == 0: return mask
     from itertools import combinations
-    labels, N = label(mask)
+    labels, N = cc3d.connected_components(mask, connectivity=6, return_N=True)
     for i,j in combinations(range(1, N+1), r=2):
         l = _connect_by_line(labels==i, labels==j, radius=radius, maxdist=maxdist)
         mask[l] = True
@@ -217,7 +217,7 @@ def build_inferior_lateral_ventricle_horns(
     for LVINFID, LVID, CPID in zip(LV_INF, LV, CP):
         mask = data == LVINFID
         if mask.sum()==0: continue
-        new_mask = remove_small_objects(mask, max_size=int(mask.sum() * 0.05))
+        new_mask = cc3d.dust(mask, threshold=int(mask.sum() * 0.05), connectivity=6)
         data = fill_from_neighbors(data, mask != new_mask, TISSUE_LABELS)
         mask = new_mask
         mask = connect_islands(mask, radius=1, maxdist=20)
@@ -229,7 +229,7 @@ def build_inferior_lateral_ventricle_horns(
         mask = nbmorph.smooth_labels_spherical(mask, smoothing_radius)
         mask[data == CPID] = 0
         if debug:
-            labels, N = label(mask)
+            labels, N = cc3d.connected_components(mask, connectivity=6, return_N=True)
             assert N == 1
         data[mask] = LVINFID
     return data
@@ -357,7 +357,7 @@ def solidify_label(data, ID, closing_radius=0, smoothing_radius=0,
     old_mask = (data == ID)
     if max_island_size is None:
         max_island_size=int(old_mask.sum() * 0.05)
-    mask = remove_small_objects(old_mask.copy(), max_size=max_island_size)
+    mask = cc3d.dust(old_mask.copy(), threshold=max_island_size, connectivity=6)
     print(f"found small objects: {(mask != old_mask).sum()} voxels")
     if connect:
         mask = connect_islands(mask, radius=1, maxdist=max_connection_dist)
@@ -395,7 +395,9 @@ def enforce_connected_ventricles(data, connection_radius=2):
     data[fm_conn] = Label.THIRD_VENTRICLE
 
     # test whether all parts are connected
-    labels, num_features = label(np.isin(data, VENTRICLE_LABELS))
+    labels, num_features = cc3d.connected_components(
+        np.isin(data, VENTRICLE_LABELS), connectivity=6, return_N=True
+    )
 
     if num_features > 1:
         import pyvista as pv
