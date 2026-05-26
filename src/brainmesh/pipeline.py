@@ -34,6 +34,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     from brainmesh import (
         Label,
         nibabel_to_pyvista,
+        save_mesh,
         solidify_csf, close_csf_space,
         fill_wm_hyperintensities, cut_bottom, extend_brainstem,
         enforce_csf_layer,
@@ -105,11 +106,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         out_seg_path = pathlib.Path(out_seg)
         out_seg_path.parent.mkdir(parents=True, exist_ok=True)
         nib.save(seg_out, out_seg_path)
-        
+
         # Dynamically extract base name (handling .nii.gz double extensions safely)
         seg_basename = out_seg_path.name.split('.')[0]
         out_vti_path = out_seg_path.parent / f"{seg_basename}.vti"
-        grid.save(out_vti_path)
+        save_mesh(grid, out_vti_path)
 
     # Extract surface
     surf = grid.contour_labels("all", smoothing=True)
@@ -121,15 +122,14 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         grid["data"] = seg.get_fdata().astype(np.uint8).flatten(order="F")
         origsurf = grid.contour_labels("all", smoothing=True)
         out_surf_orig_path = out_surf_path.parent / f"{out_surf_path.stem}_orig{out_surf_path.suffix}"
-        origsurf.save(out_surf_orig_path)
+        save_mesh(origsurf, out_surf_orig_path)
 
-        out_surf_path.parent.mkdir(parents=True, exist_ok=True)
-        surf.save(out_surf_path)
+        save_mesh(surf, out_surf_path)
 
         # Save the decimated surface, appending '_dec' to the provided surface filename
         surf_dec = coarsen_surface(surf, **asdict(cfg.coarsen_surface))
         out_surf_dec_path = out_surf_path.parent / f"{out_surf_path.stem}_dec{out_surf_path.suffix}"
-        surf_dec.save(out_surf_dec_path)
+        save_mesh(surf_dec, out_surf_dec_path)
     
     return surf
 
@@ -145,9 +145,9 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
     """
     import pytetwild
 
-    from brainmesh import mark_mesh
+    from brainmesh import mark_mesh, read_mesh, save_mesh
 
-    surf = pv.read(surf_path)
+    surf = read_mesh(surf_path)
 
     twild_defaults = dict(
         stop_energy=10,
@@ -163,10 +163,8 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
 
     mesh = pytetwild.tetrahedralize_pv(surf, **twild_defaults)
     mesh = mark_mesh(mesh, surf)
-    out_dir = pathlib.Path(out_file).parent
-    out_dir.mkdir(parents=True, exist_ok=True)
     mesh.field_data["grid_z_normal"] = surf.field_data["grid_z_normal"]
-    mesh.save(out_file)
+    save_mesh(mesh, out_file)
     return mesh
 
 
