@@ -1,6 +1,7 @@
 import pyvista as pv
 import numpy as np
 import vtk
+from tqdm import tqdm
 
 from .mesh import mark_interface_facets
 
@@ -13,81 +14,94 @@ def convert_to_quadratic(tet_mesh: pv.UnstructuredGrid) -> pv.UnstructuredGrid:
     return pv.wrap(filter_quad.GetOutput())
 
 
-def compute_quadratic_quality(quad_mesh: pv.UnstructuredGrid,
-                              quality_measure='scaled_jacobian') -> np.ndarray:
+def eval_shape_gradients(xi, eta, zeta):
     """
-    Evaluates quadratic tetrahedral quality by subdividing into 8 linear sub-tets.
-    Dynamically slices the inner octahedron using its shortest diagonal to 
-    eliminate artificial distortion penalties.
+    Evaluates the derivatives of the 10-node tetrahedron shape functions 
+    with respect to the reference coordinates (xi, eta, zeta).
+    Returns a (10, 3) numpy array.
     """
-    points = quad_mesh.points
-    cells = quad_mesh.cells.reshape(-1, 11)[:, 1:]
-    n_tets = len(cells)
+    L0 = 1.0 - xi - eta - zeta
     
-    # 1. Define the 4 corner tets (these are always the same)
-    t0 = cells[:, [0, 4, 6, 7]]
-    t1 = cells[:, [4, 1, 5, 8]]
-    t2 = cells[:, [6, 5, 2, 9]]
-    t3 = cells[:, [7, 8, 9, 3]]
+    # dN / dxi
+    dN_dxi = [
+        1 - 4*L0,      4*xi - 1,   0,             0,
+        4*(L0 - xi),   4*eta,      -4*eta,        -4*zeta,   4*zeta,    0
+    ]
     
-    # 2. Extract coordinates of the 6 mid-edge nodes (the octahedron corners)
-    p4, p5 = points[cells[:, 4]], points[cells[:, 5]]
-    p6, p7 = points[cells[:, 6]], points[cells[:, 7]]
-    p8, p9 = points[cells[:, 8]], points[cells[:, 9]]
+    # dN / deta
+    dN_deta = [
+        1 - 4*L0,      0,          4*eta - 1,     0,
+        -4*xi,         4*xi,       4*(L0 - eta),  -4*zeta,   0,         4*zeta
+    ]
     
-    # 3. Calculate squared lengths of the 3 internal octahedron diagonals
-    d0 = np.sum((p4 - p9)**2, axis=1)  # Diagonal 4-9
-    d1 = np.sum((p5 - p7)**2, axis=1)  # Diagonal 5-7
-    d2 = np.sum((p6 - p8)**2, axis=1)  # Diagonal 6-8
+    # dN / dzeta
+    dN_dzeta = [
+        1 - 4*L0,      0,          0,             4*zeta - 1,
+        -4*xi,         0,          -4*eta,        4*(L0 - zeta), 4*xi,  4*eta
+    ]
     
-    # Find which diagonal is the shortest for each individual tetrahedron
-    d_stack = np.vstack((d0, d1, d2))
-    best_diag = np.argmin(d_stack, axis=0)
+    return np.column_stack([dN_dxi, dN_deta, dN_dzeta])
+
+def compute_quadratic_quality(mesh):
+    """
+    Computes the minimum exact Jacobian determinant for every 2nd-order 
+    tetrahedron in a PyVista mesh.
     
-    # 4. Pre-allocate arrays for the 4 core sub-tetrahedra
-    t4 = np.empty((n_tets, 4), dtype=np.int64)
-    t5 = np.empty((n_tets, 4), dtype=np.int64)
-    t6 = np.empty((n_tets, 4), dtype=np.int64)
-    t7 = np.empty((n_tets, 4), dtype=np.int64)
-    
-    # 5. Populate core tets using the optimal, right-handed configuration
-    m0, m1, m2 = (best_diag == 0), (best_diag == 1), (best_diag == 2)
-    
-    # Config 0: Slice using Diagonal 4-9
-    if np.any(m0):
-        t4[m0] = cells[m0][:, [4, 5, 6, 9]]
-        t5[m0] = cells[m0][:, [4, 8, 5, 9]]
-        t6[m0] = cells[m0][:, [4, 7, 8, 9]]
-        t7[m0] = cells[m0][:, [4, 6, 7, 9]]
+    Returns: A 1D numpy array of the minimum Jacobian determinant per cell.
+    """
+    # 24 is the VTK cell type code for VTK_QUADRATIC_TETRA
+    if 24 not in mesh.cells_dict:
+        raise ValueError("No quadratic tetrahedra (type 24) found in the mesh!")
         
-    # Config 1: Slice using Diagonal 5-7
-    if np.any(m1):
-        t4[m1] = cells[m1][:, [5, 6, 4, 7]]
-        t5[m1] = cells[m1][:, [5, 9, 6, 7]]
-        t6[m1] = cells[m1][:, [5, 8, 9, 7]]
-        t7[m1] = cells[m1][:, [5, 4, 8, 7]]
+    # Get the physical (x, y, z) coordinates for all 10 nodes of every cell
+    # Shape of tet_points: (N_cells, 10, 3)
+    tet_nodes = mesh.cells_dict[24]
+    tet_points = mesh.points[tet_nodes]
+    
+    # Evaluate at the 4 vertices and the element center
+    integration_points = [
+        (0.0, 0.0, 0.0),   # Node 0
+        (1.0, 0.0, 0.0),   # Node 1
+        (0.0, 1.0, 0.0),   # Node 2
+        (0.0, 0.0, 1.0),   # Node 3
+        (0.25, 0.25, 0.25) # Center
+    ]
+    
+    N_cells = len(tet_nodes)
+    min_jacobians = np.full(N_cells, np.inf)
+            
+    for (xi, eta, zeta) in tqdm(integration_points):
+        # Get shape function gradients: Shape (10, 3)
+        dNdX = eval_shape_gradients(xi, eta, zeta)
+        J = np.einsum('nik,ij->nkj', tet_points, dNdX)
         
-    # Config 2: Slice using Diagonal 6-8
-    if np.any(m2):
-        t4[m2] = cells[m2][:, [6, 4, 5, 8]]
-        t5[m2] = cells[m2][:, [6, 5, 9, 8]]
-        t6[m2] = cells[m2][:, [6, 9, 7, 8]]
-        t7[m2] = cells[m2][:, [6, 7, 4, 8]]
+        # Unpack the 3 local basis vectors: Shape (N_cells, 3)
+        v1, v2, v3 = J[:, :, 0], J[:, :, 1], J[:, :, 2]
         
-    # 6. Combine, build mesh, and calculate quality
-    sub_tets = np.vstack((t0, t1, t2, t3, t4, t5, t6, t7))
-    
-    proxy_cells = np.column_stack((np.full(len(sub_tets), 4, dtype=np.int64), sub_tets)).ravel()
-    cell_types = np.full(len(sub_tets), pv.CellType.TETRA, dtype=np.uint8)
-    proxy_mesh = pv.UnstructuredGrid(proxy_cells, cell_types, points)
-    
-    proxy_with_quality = proxy_mesh.cell_quality(quality_measure=quality_measure)
-    sub_tet_qualities = proxy_with_quality.cell_data[quality_measure]
-    
-    parent_qualities = sub_tet_qualities.reshape((8, n_tets))
-    worst_quality_per_parent = parent_qualities.min(axis=0)
-    
-    return worst_quality_per_parent
+        # 1. Determinant via Scalar Triple Product: det(J) = v1 · (v2 × v3)
+        detJ = np.einsum('ni,ni->n', v1, np.cross(v2, v3))
+        
+        # 2. Base edge lengths (norms of v1, v2, v3 computed all at once)
+        l0, l2, l3 = np.linalg.norm(J, axis=1).T 
+        
+        # 3. Cross-edge lengths
+        l1 = np.linalg.norm(v2 - v1, axis=1)
+        l4 = np.linalg.norm(v3 - v1, axis=1)
+        l5 = np.linalg.norm(v3 - v2, axis=1)
+        
+        # 4. Max edge-length product among the 4 corners
+        max_length_product = np.max([
+            l0 * l2 * l3,
+            l0 * l1 * l4,
+            l1 * l2 * l5,
+            l3 * l4 * l5
+        ], axis=0)
+        
+        # 5. Compute scaled Jacobian and update minimums in-place
+        scaled_J = (np.sqrt(2.0) * detJ) / (max_length_product + 1e-14)
+        np.minimum(min_jacobians, scaled_J, out=min_jacobians)
+            
+    return min_jacobians
 
 
 def adaptive_snap_boundaries(
@@ -165,7 +179,7 @@ def adaptive_snap_boundaries(
             print(f"  -> Adaptive snapping converged successfully at iteration {i+1}!")
             break
             
-        print(f"  -> Iteration {i+1}: Found {len(bad_tet_idx)} ({100 *len(bad_tet_idx) / len(all_boundary_ids):.3f}%) bad elements. Relaxing nodes...")
+        print(f"  -> Iteration {i+1}: Found {len(bad_tet_idx)} ({100 *len(bad_tet_idx) / len(all_boundary_ids):.3f}%) bad elements. Relaxing nodes with decay step {decay_step}...")
         
         # Find which specific nodes belong to the inverted elements
         bad_point_ids = np.unique(raw_cells[bad_tet_idx])
@@ -186,24 +200,29 @@ def adaptive_snap_boundaries(
             quad_mesh.points[all_boundary_ids] = P_orig + alpha[:, np.newaxis] * (P_target - P_orig)
             break
 
+    print("\n  -> Final Alpha Distribution:")
+    unique_alphas, counts = np.unique(np.round(alpha, decimals=5), return_counts=True)
+    
+    # Sort them in descending order (from 1.0 down to 0.0)
+    sort_idx = np.argsort(unique_alphas)[::-1]
+    unique_alphas = unique_alphas[sort_idx]
+    counts = counts[sort_idx]
+    
+    total_nodes = len(all_boundary_ids)
+    for a_val, count in zip(unique_alphas, counts):
+        pct = (count / total_nodes) * 100
+        print(f"       Alpha = {a_val:.2f}: {count:7d} nodes ({pct:5.2f}%)")
+    print("-" * 50)
+    return all_boundary_ids
 
-def print_quality_stats(mesh: pv.UnstructuredGrid, mesh_name: str, approx_linear: bool = False):
+def print_quality_stats(mesh: pv.UnstructuredGrid, mesh_name: str):
     """Computes and prints the Scaled Jacobian quality of the mesh."""
     
-    # Check if the mesh is quadratic. If so, drop to linear JUST for the quality check.
-    # VTK returns -1.0 for all non-linear cell qualities.
-    if approx_linear and mesh.celltypes[0] == vtk.VTK_QUADRATIC_TETRA:
-        print(f"  [*] Note: {mesh_name} is quadratic. Evaluating quality using corner nodes only.")
-        eval_mesh = mesh.linear_copy()
-    else:
-        eval_mesh = mesh
-
-    if eval_mesh.celltypes[0] == vtk.VTK_QUADRATIC_TETRA:
-        print(f"  [*] Note: {mesh_name} is quadratic. Approximating by subdivision into 8 tetra.")
-        q_arr = compute_quadratic_quality(eval_mesh)
+    if mesh.celltypes[0] == vtk.VTK_QUADRATIC_TETRA:
+        q_arr = compute_quadratic_quality(mesh)
 
     else:
-        mesh_with_quality = eval_mesh.cell_quality(quality_measure='scaled_jacobian')
+        mesh_with_quality = mesh.cell_quality(quality_measure='scaled_jacobian')
         q_arr = mesh_with_quality.cell_data['scaled_jacobian']
     
     print(f"--- {mesh_name} Cell Quality (Scaled Jacobian) ---")
