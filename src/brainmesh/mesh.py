@@ -128,7 +128,8 @@ def remark_csf_with_sas(mesh, sas_img, csf_label=Label.CSF, label_array="marker"
 
 def load_marked_mesh(path, label_array="marker"):
     """Load a tetrahedral mesh produced by :func:`mark_mesh` from disk."""
-    mesh = pv.read(path)
+    from .io import read_mesh
+    mesh = read_mesh(path)
     if label_array not in mesh.cell_data:
         raise ValueError(
             f"{path} has no '{label_array}' cell-data array — "
@@ -316,10 +317,16 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     -------
     pv mesh  copy of ``facets`` with added ``region`` (int32) cell array
     """
-    from .labels import region_dict, _sas_lh, _sas_rh
+    from .labels import region_dict as sas_region_dict
+    from .labels import _sas_lh, _sas_rh
+
+    region_label_dict = {"SPINAL_CSF": 1, "PIA": 3, "LATERAL_VENTRICLES":2,
+                         "FALX":4, "TENTORIUM_UPPER":5, "TENTORIUM_LOWER":6,
+                         "ANTERIOR_PARASAGITTAL_SINUS":8,"POSTERIOR_PARASAGITTAL_SINUS":9}
+
     ids = np.asarray(facets.cell_data["interface_id"], dtype=np.int64)
     a, b = np.divmod(ids, encoding_base)
-
+    
     region = np.zeros(len(ids), dtype=np.int32)
 
     def _assign(mask, rid):
@@ -335,29 +342,29 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
                            np.isin(b, csf_labels)), remove_id)
 
     # 1. Spinal canal
-    _assign(ids == SPINAL_ID, 1)
+    _assign(ids == SPINAL_ID, region_label_dict["SPINAL_CSF"])
 
     # mark lateral ventricle surface
     LVs = list(set(VENTRICLE_LABELS) - set((Label.THIRD_VENTRICLE,
                                             Label.FOURTH_VENTRICLE)))
-    _assign(np.logical_xor(np.isin(a, LVs), np.isin(b, LVs)), 2)
+    _assign(np.logical_xor(np.isin(a, LVs), np.isin(b, LVs)), region_label_dict["LATERAL_VENTRICLES"])
 
     # mark FALX
-    _assign((a==Label.FALX) + (b==Label.FALX), 4)
+    _assign((a==Label.FALX) + (b==Label.FALX), region_label_dict["FALX"])
 
     # mark up and downward facing parts of tentorium
-    _assign((a==tent) + (b==tent), 5)
-    infra_tent_ids = list(region_dict["_SAS_INFRATENTORIAL"])
-    region[np.logical_and(a==tent, np.isin(b, infra_tent_ids))] = 6
-    region[np.logical_and(b==tent, np.isin(a, infra_tent_ids))] = 6
+    _assign((a==tent) + (b==tent), region_label_dict["TENTORIUM_UPPER"])
+    infra_tent_ids = list(sas_region_dict["INFRATENTORIAL"])
+    region[np.logical_and(a==tent, np.isin(b, infra_tent_ids))] = region_label_dict["TENTORIUM_LOWER"]
+    region[np.logical_and(b==tent, np.isin(a, infra_tent_ids))] = region_label_dict["TENTORIUM_LOWER"]
 
     # all remaining internal -> tissue
-    _assign(ids >= encoding_base, 3)
+    _assign(ids >= encoding_base, region_label_dict["PIA"])
 
     # mark specified regions:
-    for i, (k, v) in enumerate(region_dict.items()):
-        print(k, v)
+    for i, (k, v) in enumerate(sas_region_dict.items()):
         _assign(np.isin(ids, list(v)), 10 + i)
+        region_label_dict[k] = 10 + i
 
     # mark sagittal sinus
     # find right and left SAS labels
@@ -373,18 +380,20 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     # finally mark the front and back, depending on the SAS label IDs
     anterior_PSD = [1017,1022,1024, 1028]
     posterior_PSD = [1025, 1029, 1005, 1011, 1013]
-    region[np.logical_and(PSD, np.isin(ids, _sas_rh(anterior_PSD) + _sas_lh(anterior_PSD)))] = 8
-    region[np.logical_and(PSD, np.isin(ids, _sas_rh(posterior_PSD) + _sas_lh(posterior_PSD)))] = 9
+    region[np.logical_and(PSD, np.isin(ids, _sas_rh(anterior_PSD) + _sas_lh(anterior_PSD)))] = region_label_dict["ANTERIOR_PARASAGITTAL_SINUS"]
+    region[np.logical_and(PSD, np.isin(ids, _sas_rh(posterior_PSD) + _sas_lh(posterior_PSD)))] = region_label_dict["POSTERIOR_PARASAGITTAL_SINUS"]
     
     sas_regions = np.unique(region[region >= 10]).tolist()
     out = facets.copy()
     region = remove_small_patches(out, region, threshold=50, target_labels=sas_regions)
     region = dilate_cell_marker(out, region, 10)
     out.cell_data["region"] = region
-    out = smooth_cell_labels(out, marker_name="region", target_labels=sas_regions + [8,9])
-    out = out.extract_cells(out.cell_data["region"] >= 0)
+    out = smooth_cell_labels(out, marker_name="region", target_labels=sas_regions + [region_label_dict["ANTERIOR_PARASAGITTAL_SINUS"],
+                                                                                      region_label_dict["POSTERIOR_PARASAGITTAL_SINUS"]])
+    out = filter_by_mask(out, out.cell_data["region"] >= 0)
     assert (region==0).sum() == 0
-    return out
+    out.field_data["region_names"] = region_label_dict
+    return out, region_label_dict
 
 
 def _tet_face_topology(mesh):
@@ -477,13 +486,19 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000,
     """
     topo = _tet_face_topology(mesh)
     markers = np.asarray(mesh.cell_data[label_array])
+    points = np.asarray(mesh.points)
+    tet_centroids = np.asarray(mesh.cell_centers().points)
 
     faces = topo["interface_faces"]
-    m_a = markers[topo["interface_parents_a"]]
-    m_b = markers[topo["interface_parents_b"]]
+    parents_a = topo["interface_parents_a"]
+    parents_b = topo["interface_parents_b"]
+    m_a = markers[parents_a]
+    m_b = markers[parents_b]
 
     diff = m_a != m_b
     faces = faces[diff]
+    parents_a = parents_a[diff]
+    parents_b = parents_b[diff]
     m_a = m_a[diff]
     m_b = m_b[diff]
 
@@ -492,7 +507,34 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000,
 
     if ignore_sas_interfaces:
         keep = lo <= SAS_LABEL_OFFSET
-        faces, lo, hi = faces[keep], lo[keep], hi[keep]
+        faces = faces[keep]
+        parents_a = parents_a[keep]
+        parents_b = parents_b[keep]
+        m_a = m_a[keep]
+        m_b = m_b[keep]
+        lo = lo[keep]
+        hi = hi[keep]
+
+    # Orient face winding so each normal points from the lo-marker region
+    # toward the hi-marker region. The raw winding from _tet_face_topology
+    # depends on which adjacent tet happened to be sorted first, so we
+    # explicitly recompute and flip — same idea as mark_mesh flipping faces
+    # whose label is on the "in" side.
+    if len(faces) > 0:
+        corners = points[faces[:, :3]]
+        centroids = corners.mean(axis=1)
+        e1 = corners[:, 1] - corners[:, 0]
+        e2 = corners[:, 2] - corners[:, 0]
+        normals = np.cross(e1, e2)
+
+        lo_parents = np.where(m_a == lo, parents_a, parents_b)
+        lo_centroids = tet_centroids[lo_parents]
+        flip = np.einsum("ij,ij->i", normals, centroids - lo_centroids) < 0
+
+        if faces.shape[1] == 3:
+            faces[flip] = faces[flip][:, [0, 2, 1]]
+        else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
+            faces[flip] = faces[flip][:, [0, 2, 1, 5, 4, 3]]
 
     interface_id = lo * encoding_base + hi
 
@@ -578,7 +620,6 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     centroids = corners.mean(axis=1)        # (N, 3)
 
     up_normal = np.asarray(mesh.field_data["grid_z_normal"]).flatten()
-    print(up_normal)
     down_normal = -up_normal
 
     # Compute raw face normals from corner winding order.
@@ -593,6 +634,13 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
     parent_centroids = tet_centroids[topo["boundary_parents"]]
     inward = np.einsum("ij,ij->i", normals, parent_centroids - centroids) > 0
     normals[inward] *= -1
+
+    # Also flip the face winding for inward faces so the output mesh has
+    # consistently outward-oriented triangles.
+    if faces.shape[1] == 3:
+        faces[inward] = faces[inward][:, [0, 2, 1]]
+    else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
+        faces[inward] = faces[inward][:, [0, 2, 1, 5, 4, 3]]
 
     # Criterion 1: parent tet is a CSF cell.
     csf_mask = np.isin(boundary, csf_labels) | (boundary > SAS_LABEL_OFFSET)
@@ -733,13 +781,36 @@ def mark_boundary_facets(mesh, label_array="marker"):
     Build a facet mesh of all outer boundary facets of the input tet mesh,
     each labelled by the marker of its single adjacent region.
 
+    Face winding is oriented so each normal points outward (away from the
+    parent tet centroid).
+
     The resulting :class:`pyvista.PolyData` shares the parent's point
     array, so vertex indices line up with the parent tet mesh.
     """
     topo = _tet_face_topology(mesh)
     markers = np.asarray(mesh.cell_data[label_array])
+    points = np.asarray(mesh.points)
+    tet_centroids = np.asarray(mesh.cell_centers().points)
 
     faces = topo["boundary_faces"]
-    boundary = markers[topo["boundary_parents"]].astype(np.int64)
+    parents = topo["boundary_parents"]
+    boundary = markers[parents].astype(np.int64)
+
+    # Orient face winding so each normal points outward, away from the
+    # parent tet centroid — same convention used in mark_spinal_boundary.
+    if len(faces) > 0:
+        corners = points[faces[:, :3]]
+        centroids = corners.mean(axis=1)
+        e1 = corners[:, 1] - corners[:, 0]
+        e2 = corners[:, 2] - corners[:, 0]
+        normals = np.cross(e1, e2)
+
+        parent_centroids = tet_centroids[parents]
+        flip = np.einsum("ij,ij->i", normals, centroids - parent_centroids) < 0
+
+        if faces.shape[1] == 3:
+            faces[flip] = faces[flip][:, [0, 2, 1]]
+        else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
+            faces[flip] = faces[flip][:, [0, 2, 1, 5, 4, 3]]
 
     return _build_facet_polydata(mesh, faces, {"boundary": boundary})
