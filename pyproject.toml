@@ -22,8 +22,12 @@ dependencies = [
     "scikit-image",
     "scipy",
     "numba",
+    "connected-components-3d",
     "vtk>=9.6",
-    "matplotlib"
+    "matplotlib",
+    "meshio",
+    "h5py",
+    "tomlkit"
 ]
 
 [project.urls]
