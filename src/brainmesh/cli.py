@@ -27,8 +27,8 @@ def surface_main(argv=None):
     parser.add_argument("--decimation-ratio", type=float, default=None,
                         help="Override coarsen_surface.decimation_ratio.")
 
-    parser.add_argument("--threads", type=int, default=8,
-                        help="Number of numba threads (default: 8)")
+    parser.add_argument("--threads", type=int, default=1,
+                        help="Number of numba threads (default: 1)")
     args = parser.parse_args(argv)
 
     from brainmesh.config import SegmentationConfig
@@ -361,8 +361,8 @@ def subdivide_SAS(argv=None):
     parser.add_argument("--segfile",help="Input segmentation (.nii.gz)")
     parser.add_argument("--parcfile",help="Input parcellation (.nii.gz)")
     parser.add_argument("-o", "--outfile", help="Output file")
-    parser.add_argument("--threads", type=int, default=8,
-                        help="Number of numba threads (default: 8)")
+    parser.add_argument("--threads", type=int, default=1,
+                        help="Number of numba threads (default: 1)")
     args = parser.parse_args(argv)
 
     from brainmesh.pipeline import subdivide_SAS
