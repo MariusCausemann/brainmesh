@@ -660,7 +660,8 @@ def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distanc
 
     surf = _build_facet_polydata(mesh, faces, {"boundary": spinal_mask})
     surf = smooth_cell_labels(surf, "boundary", target_labels=[False, True])
-    spinal_mask = surf["boundary"]
+    # we also require CSF mask, to avoid smoothing into the brainstem outer boundary!
+    spinal_mask = surf["boundary"] & csf_mask
 
     spinal_faces = faces[spinal_mask]
     spinal_boundary = boundary[spinal_mask]
