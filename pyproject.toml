@@ -27,7 +27,8 @@ dependencies = [
     "matplotlib",
     "meshio",
     "h5py",
-    "tomlkit"
+    "tomlkit",
+    "tqdm
 ]
 
 [project.urls]
