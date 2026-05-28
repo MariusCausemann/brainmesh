@@ -28,7 +28,7 @@ dependencies = [
     "meshio",
     "h5py",
     "tomlkit",
-    "tqdm
+    "tqdm"
 ]
 
 [project.urls]
