@@ -97,9 +97,9 @@ def curve_mesh_main(argv=None):
                         help="Path to target high-res surface mesh (.vtk, .stl, .ply, .obj, ...)")
     parser.add_argument("-o", "--output", type=str, default="snapped_output.vtk",
                         help="Path to save the output mesh (default: snapped_output.vtk)")
-    parser.add_argument("--min-quality-factor", type=float, default=0.8,
+    parser.add_argument("--min-quality-factor", type=float, default=0.9,
                         help="Minimum allowed quality as a fraction of the original mesh's"
-                             " minimum quality (default: 0.8)")
+                             " minimum quality (default: 0.9)")
     args = parser.parse_args(argv)
 
     from brainmesh.curved_mesh import (
@@ -370,3 +370,41 @@ def subdivide_SAS(argv=None):
 
     labeled_SAS = subdivide_SAS(args.segfile,args.parcfile, numba_threads=args.threads)
     nib.save(labeled_SAS, args.outfile)
+
+
+
+def unlock_tets(argv=None):
+    parser = argparse.ArgumentParser(
+        description=(
+            "Subdivide tetrahedra that have three boundary facets (external "
+            "boundary or inter-region interface) by inserting a node on the "
+            "single interior facet, looping until none remain."
+        )
+    )
+    parser.add_argument("--input", help="input tetrahedral mesh (any format PyVista reads)")
+    parser.add_argument("--label_array",default="marker",
+        help="name of the cell-data array holding label array"
+        "(facets between different markers are internal boundaries)",
+    )
+    parser.add_argument("--output", help="output mesh path (e.g. .vtu)")
+
+    args = parser.parse_args(argv)
+
+    from .unlock_refine import subdivide_grid
+    from brainmesh.io import read_mesh, save_mesh
+
+    grid = read_mesh(args.input)
+    print(grid.array_names)
+    assert "grid_z_normal" in grid.array_names
+
+    out = subdivide_grid(
+        grid, args.label_array, max_passes=100, verbose=True
+    )
+    out.field_data["grid_z_normal"] = grid.field_data["grid_z_normal"]
+
+    print(
+        f"Cells: {grid.cast_to_unstructured_grid().n_cells} -> {out.n_cells}; "
+        f"points: {grid.n_points} -> {out.n_points}",
+    )
+    print(f"Writing {args.output}")
+    save_mesh(out, args.output)

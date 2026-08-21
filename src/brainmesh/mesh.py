@@ -3,6 +3,10 @@ import numpy as np
 import igl
 import pyvista as pv
 
+from collections import defaultdict
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
+
 from .decorators import time_func
 from .io import get_img
 from .labels import Label, VENTRICLE_LABELS, SAS_LABEL_OFFSET, SPINAL_ID
@@ -164,9 +168,118 @@ def filter_by_mask(mesh, mask):
     # Transfer the cell data over
     for name in mesh.cell_data:
         retained_mesh.cell_data[name] = mesh.cell_data[name][mask]
+    
+    for name in mesh.point_data:
+        retained_mesh.point_data[name] = mesh.point_data[name]
         
     return retained_mesh
 
+
+# treat linear + quadratic tets as "volume", linear + quadratic tris as "surface"
+VOL_TYPES = (pv.CellType.TETRA, pv.CellType.QUADRATIC_TETRA)
+TRI_TYPES = (pv.CellType.TRIANGLE, pv.CellType.QUADRATIC_TRIANGLE)
+
+def _gather(mesh, types, n_corner):
+    """(corners (m, n_corner), global_ids (m,)) for the given cell types."""
+    cdict, ct = mesh.cells_dict, mesh.celltypes
+    corner_blocks, id_blocks = [], []
+    for t in types:
+        if t in cdict:
+            gids = np.where(ct == t)[0]          # ascending, aligns with cdict[t]
+            corner_blocks.append(cdict[t][:, :n_corner])
+            id_blocks.append(gids)
+    if not corner_blocks:
+        return np.empty((0, n_corner), int), np.empty(0, int)
+    return np.vstack(corner_blocks), np.concatenate(id_blocks)
+
+def _tet_volumes(points, corners):
+    p = points[corners]                          # (m, 4, 3)
+    a, b, c = p[:, 1] - p[:, 0], p[:, 2] - p[:, 0], p[:, 3] - p[:, 0]
+    return np.abs(np.einsum('ij,ij->i', a, np.cross(b, c))) / 6.0
+
+def largest_face_connected(mesh, by_volume=True, keep_surface_tris=True):
+    tet_corners, tet_gids = _gather(mesh, VOL_TYPES, 4)
+    n = len(tet_corners)
+    if n == 0:
+        raise ValueError("no tetrahedral cells found")
+
+    combos = [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)]
+    face_to_local = defaultdict(list)            # corner-face -> local tet indices
+    for li, tet in enumerate(tet_corners):
+        for a, b, c in combos:
+            face_to_local[tuple(sorted((tet[a], tet[b], tet[c])))].append(li)
+
+    rows, cols = [], []
+    for cs in face_to_local.values():
+        if len(cs) == 2:                         # internal face shared by 2 tets
+            x, y = cs
+            rows += [x, y]; cols += [y, x]
+
+    adj = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
+    _, labels = connected_components(adj, directed=False)
+
+    if by_volume:
+        weights = np.bincount(labels, weights=_tet_volumes(mesh.points, tet_corners))
+    else:
+        weights = np.bincount(labels)
+    win = weights.argmax()
+
+    keep_local = np.where(labels == win)[0]
+    keep_global = tet_gids[keep_local].tolist()
+
+    if keep_surface_tris:
+        tri_corners, tri_gids = _gather(mesh, TRI_TYPES, 3)
+        if len(tri_gids):
+            kept_faces = set()
+            for li in keep_local:
+                tet = tet_corners[li]
+                for a, b, c in combos:
+                    kept_faces.add(tuple(sorted((tet[a], tet[b], tet[c]))))
+            for ti, tri in zip(tri_gids, tri_corners):
+                if tuple(sorted(tri)) in kept_faces:
+                    keep_global.append(int(ti))
+
+    return mesh.extract_cells(keep_global)
+
+def extract_reduced_facets(reduced_tets, full_facets):
+    """Facets of `full_facets` bounding `reduced_tets`, rebuilt on
+    `reduced_tets.points` with its exact node ordering. Linear or quadratic.
+    Assumes both objects share point_data['gid'] from the full mesh."""
+    TET = (pv.CellType.TETRA, pv.CellType.QUADRATIC_TETRA)
+    FACE_IDX = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
+
+    def keys(rows):
+        a = np.ascontiguousarray(np.sort(rows, axis=1))
+        return a.view([('', a.dtype)] * a.shape[1]).ravel()
+
+    # facet connectivity (single triangle type) + point->global map
+    fcd = full_facets.cells_dict
+    tris = [t for t in fcd if t in (pv.CellType.TRIANGLE, pv.CellType.QUADRATIC_TRIANGLE)]
+    assert len(tris) == 1, "mixed facet types; fall back to the extract_cells version"
+    ttype = tris[0]
+    conn = fcd[ttype]                                          # (n, 3 or 6)
+    fg = (np.asarray(full_facets.point_data['gid']) if 'gid' in full_facets.point_data
+          else np.arange(full_facets.n_points))               # facet-pt -> global
+
+    # corner faces of the reduced tets, as global ids
+    csf_gid = np.asarray(reduced_tets.point_data['gid']).astype(np.uint32)       # local -> global
+    tet_corners = np.vstack([reduced_tets.cells_dict[t][:, :4]
+                             for t in TET if t in reduced_tets.cells_dict])
+    csf_faces = csf_gid[tet_corners][:, FACE_IDX].reshape(-1, 3)
+
+    keep = np.isin(keys(fg[conn[:, :3]]), keys(csf_faces))
+
+    # remap kept facets straight to reduced_tets-local numbering
+    g2l = np.full(int(csf_gid.max()) + 1, -1, np.int64)
+    g2l[csf_gid] = np.arange(len(csf_gid), dtype=np.uint32)
+    local = g2l[fg[conn[keep]]]
+    assert (local >= 0).all(), "kept facet node missing from reduced_tets (gid mismatch)"
+
+    out = pv.UnstructuredGrid({ttype: local}, reduced_tets.points)
+    out.point_data.update(reduced_tets.point_data)            # shares csf_mesh point arrays
+    for k in full_facets.cell_data:
+        out.cell_data[k] = np.asarray(full_facets.cell_data[k])[keep]
+    return out
 
 def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs):
     """
@@ -197,48 +310,23 @@ def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs)
     all_markers = np.asarray(mesh.cell_data[label_array])
     sas_labels = np.unique(all_markers[all_markers > SAS_LABEL_OFFSET]).tolist()
     csf_labels = list(VENTRICLE_LABELS) + [Label.CSF] + sas_labels
-    csf_mesh = filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))
 
     if not return_facets:
-        return csf_mesh.clean()
+        csf_mesh = filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))
+        return largest_face_connected(csf_mesh.clean())
 
+    mesh["gid"] = np.arange(mesh.n_points)
+    csf_mesh = largest_face_connected(filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))).clean()
+    assert "gid" in csf_mesh.array_names
     # Compute facets on the full mesh (preserves CSF-to-tissue interface IDs),
-    # then keep facets whose interface_id involves a CSF marker. Operates purely
-    # on cell data, so this works for both linear and quadratic tet meshes.
     full_facets = mark_facets(mesh, label_array=label_array, **facet_kwargs)
-    assert np.allclose(full_facets.points, mesh.points)
-    encoding_base = facet_kwargs.get("encoding_base", 100000)
-    ids = np.asarray(full_facets.cell_data["interface_id"])
-    a, b = np.divmod(ids, encoding_base)  # boundary: a=0, b=id; interface: (min,max)
-    csf_arr = np.asarray(csf_labels)
-    mask = np.isin(a, csf_arr) | np.isin(b, csf_arr) | (ids == SPINAL_ID)
 
-    csf_facets = filter_by_mask(full_facets, mask)
+    csf_facets = extract_reduced_facets(csf_mesh, full_facets)
 
-    combined_cells = np.concatenate([csf_mesh.cells, csf_facets.cells])
-    combined_types = np.concatenate([csf_mesh.celltypes, csf_facets.celltypes])
-
-    # 2. Create the massive combined grid sharing the parent points
-    combined_grid = pv.UnstructuredGrid(combined_cells, combined_types, mesh.points)
-
-    # 3. Let PyVista/VTK clean it (removes all rest-of-body points and remaps IDs automatically)
-    cleaned_grid = combined_grid.clean()
-
-    # 4. Split them back apart! 
-    # Since clean() doesn't reorder cells, the flat array splits exactly at the original length
-    split_idx = len(csf_mesh.cells)
-
-    final_tets_cells = cleaned_grid.cells[:split_idx]
-    final_tris_cells = cleaned_grid.cells[split_idx:]
-
-    # 5. Reconstruct the final, separated meshes using the newly cleaned shared point array
-    csf_mesh_cleaned = pv.UnstructuredGrid(final_tets_cells, csf_mesh.celltypes, cleaned_grid.points)
-    csf_facets_cleaned = pv.UnstructuredGrid(final_tris_cells, csf_facets.celltypes, cleaned_grid.points)
-
-    csf_mesh_cleaned.cell_data[label_array] = csf_mesh.cell_data[label_array]
-    csf_facets_cleaned.cell_data["interface_id"] = csf_facets.cell_data["interface_id"]
-    assert np.allclose(csf_mesh_cleaned.points, csf_facets_cleaned.points)
-    return csf_mesh_cleaned, csf_facets_cleaned
+    assert np.allclose(csf_mesh.points, csf_facets.points)
+    assert label_array in csf_mesh.array_names
+    assert "interface_id" in csf_facets.array_names
+    return csf_mesh, csf_facets
 
 
 def mark_between_regions(ids_a, ids_b, da, db, seg, label_array):
