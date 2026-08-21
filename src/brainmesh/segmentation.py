@@ -118,18 +118,21 @@ def binary_fill_holes(img):
 
     return ~external_bg
 
-@plot_voxel_changes(num_samples=4, window_radius=12)
+#@plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
-@njit(parallel=True, cache=True)
+#@njit(parallel=True, cache=True)
 def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1):
+    from cc3d import dust
     mask = data > 0
     closed_mask = nbmorph.close_labels_spherical(
         mask, radius=mask_closing_radius, iterations=mask_closing_iterations
     )
     seal = dilate(closed_mask) ^ closed_mask
     holes = binary_fill_holes(mask + seal) & ~(mask + dilate(seal, radius=1))
+    large_holes = dust(holes, threshold=500, connectivity=6)
     set_mask_scalar(data, holes, Label.CSF)
+    set_mask_scalar(data, large_holes, Label.UNCLASSIFIED)
     return data
 
 
@@ -143,7 +146,7 @@ def close_csf_space(data, radius=1, iter=1, brainstem_area_radius=0):
         brainstem_mask = dilate(data == Label.BRAIN_STEM, radius=brainstem_area_radius)
     else:
         brainstem_mask = np.ones(data.shape, dtype=np.bool_)
-    set_mask_scalar(data, closed_mask & (data == 0) & brainstem_mask, Label.CSF)
+    set_mask_scalar(data, closed_mask & (data == 0) & brainstem_mask, Label.UNCLASSIFIED)
     return data
 
 
@@ -169,6 +172,16 @@ def fill_from_neighbors(data, mask, neighbors, max_radius=100):
             break
 
     copy_mask(data, mask, nb_mask)
+    return data
+
+@plot_voxel_changes(num_samples=4, window_radius=12)
+@track_voxel_changes
+@time_func
+def fill_small_unclassified_fragments(data, size):
+    from cc3d import dust
+    uncl_mask = data==Label.UNCLASSIFIED
+    large_unclassified = dust(uncl_mask, threshold=size, connectivity=6)
+    set_mask_scalar(data, uncl_mask & ~large_unclassified, Label.CSF)
     return data
 
 @plot_voxel_changes(num_samples=4, window_radius=12)
@@ -231,9 +244,13 @@ def enforce_csf_layer(data, thickness=1):
         & (data != Label.TENTORIUM)
         & (data != Label.FALX)
         & (data != Label.BRAIN_STEM)
+        & (data != Label.UNCLASSIFIED)
     )
     dilated_mask = dilate(mask, radius=thickness, struct_sequence="B")
     mask += data == Label.BRAIN_STEM
+    mask += data == Label.UNCLASSIFIED
+    mask += data == Label.TENTORIUM
+    mask += data == Label.FALX
     return set_mask_scalar(data, dilated_mask > mask, Label.CSF)
 
 
@@ -244,7 +261,9 @@ def enforce_csf_layer(data, thickness=1):
 def enforce_csf_around_tentorium(data, radius=1):
     tent_mask = data == Label.TENTORIUM
     dil_tent_mask = dilate(tent_mask, radius=radius, struct_sequence="B")
-    set_mask_scalar(data, dil_tent_mask & ~tent_mask & (data > 0) & (data != Label.FALX), Label.CSF)
+    set_mask_scalar(data, dil_tent_mask & (data==Label.UNCLASSIFIED), Label.TENTORIUM)
+    set_mask_scalar(data, dil_tent_mask & ~tent_mask & (data > 0) &
+                          (data != Label.FALX), Label.CSF)
     return data
 
 @plot_voxel_changes(num_samples=4, window_radius=12)

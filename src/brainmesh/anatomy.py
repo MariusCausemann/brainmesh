@@ -187,6 +187,7 @@ def create_tentorium(
     tent_mask = cc3d.dust(tent_mask, threshold=int(tent_mask.sum() * 0.2), connectivity=6)
     data[tent_mask] = Label.TENTORIUM
     enforce_csf_around_tentorium(data, radius=surrounding_csf_radius)
+    # remove falx fragments below tentorium
     data[(~cer_territory) & (phantom_ceb > 0) & (data == Label.FALX)] = Label.CSF
     return data
 

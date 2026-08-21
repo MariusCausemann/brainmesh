@@ -17,7 +17,8 @@ from .segmentation import (
     enforce_csf_layer,
     enforce_csf_around_tentorium,
     enforce_csf_around_falx,
-    grow_into_region
+    grow_into_region,
+    fill_small_unclassified_fragments
 )
 from .anatomy import (
     create_falx,

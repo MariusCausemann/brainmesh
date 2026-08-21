@@ -41,7 +41,7 @@ class EnforceCSFLayerCfg:
 
 @dataclass
 class FalxCfg:
-    hemisphere_gap: int = 6
+    hemisphere_gap: int = 5
     territory_smoothing_sigma: float = 20.0
     boundary_thickness_radius: int = 1
     cerebrum_proximity_radius: int = 25
@@ -54,7 +54,7 @@ class FalxCfg:
 @dataclass
 class TentoriumCfg:
     cerebrum_cerebellum_gap: int = 3
-    territory_smoothing_sigma: float = 6.0
+    territory_smoothing_sigma: float = 7.0
     phantom_cerebellum_sigma_factor: float = 3.0
     boundary_thickness_radius: int = 1
     cerebrum_cerebellum_proximity_radius: int = 12

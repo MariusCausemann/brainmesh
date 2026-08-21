@@ -47,20 +47,25 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         enforce_min_thickness,
         enforce_tight_ventricles,
         coarsen_surface,
-        straighten_spinal_interface
+        straighten_spinal_interface,
+        fill_small_unclassified_fragments
     )
 
     cfg = config or SegmentationConfig()
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
     assert np.shares_memory(data, seg.get_fdata()) == False
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = solidify_csf(data, **asdict(cfg.solidify_csf))
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = close_csf_space(data, **asdict(cfg.close_csf_space))
+    #print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = fill_wm_hyperintensities(data)
     data = cut_bottom(data, **asdict(cfg.cut_bottom))
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = extend_brainstem(data, **asdict(cfg.extend_brainstem))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_pre))
-
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
 
     orig_mask = nbm.smooth_labels_spherical(data > 0,
                                             radius=cfg.misc.original_mask_smoothing_radius)
@@ -94,9 +99,12 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))
     data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
+
+    data = fill_small_unclassified_fragments(data, size=100)
+
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     assert data.dtype == np.uint8
     seg_out = nib.Nifti1Image(data, seg.affine)
-    
     # We still need the grid for surface extraction
     grid = nibabel_to_pyvista(seg_out)
     grid["data"] = data.flatten(order="F")
@@ -106,11 +114,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         out_seg_path = pathlib.Path(out_seg)
         out_seg_path.parent.mkdir(parents=True, exist_ok=True)
         nib.save(seg_out, out_seg_path)
-
         # Dynamically extract base name (handling .nii.gz double extensions safely)
         seg_basename = out_seg_path.name.split('.')[0]
         out_vti_path = out_seg_path.parent / f"{seg_basename}.vti"
         save_mesh(grid, out_vti_path)
+        exit()
 
     # Extract surface
     surf = grid.contour_labels("all", smoothing=True)
