@@ -101,5 +101,6 @@ def straighten_spinal_interface(surf, orig_grid):
 @time_func
 def coarsen_surface(surf, decimation_ratio=0.5):
     surf_dec = surf.decimate(decimation_ratio)
-    surf.field_data["grid_z_normal"] = surf_dec.field_data["grid_z_normal"]
+    if "grid_z_normal" in surf_dec.field_data.keys():
+        surf.field_data["grid_z_normal"] = surf_dec.field_data["grid_z_normal"]
     return transfer_labels(surf, surf_dec, "boundary_labels")
