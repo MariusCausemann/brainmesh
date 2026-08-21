@@ -121,10 +121,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         seg_basename = out_seg_path.name.split('.')[0]
         out_vti_path = out_seg_path.parent / f"{seg_basename}.vti"
         save_mesh(grid, out_vti_path)
+        exit()
 
     # Extract surface
     surf = grid.contour_labels("all", smoothing=True)
-    surf = straighten_spinal_interface(surf, grid)
+    #surf = straighten_spinal_interface(surf, grid)
 
     # Only save surface outputs if requested
     if out_surf is not None:

@@ -446,6 +446,7 @@ def extend_brainstem_caudally(
     csf_buffer_radius=4,
 ):
     """Extends the brainstem downwards through the CSF to the bottom of the image."""
+    from cc3d import largest_k
     lowest_brain_stem = get_lowest_point(data == Label.BRAIN_STEM)[2]
     lowest_csf = get_lowest_point(data == Label.CSF)[2]
 
@@ -461,6 +462,10 @@ def extend_brainstem_caudally(
     for fp, l in [(footprint_csf, Label.CSF), (footprint, Label.BRAIN_STEM)]:
         mask_to_replace = fp & np.logical_or(target_block == Label.CSF, target_block == 0)
         target_block[mask_to_replace] = l
+
+    buffer_mask = largest_k(data[:,:,z_min] > 0, k=1) > 0
+    assert buffer_mask.sum() > 0
+    data[:, :, max(0, z_min - 5):z_min][buffer_mask, :] = Label.SPINAL_BUFFER
     return data
 
 

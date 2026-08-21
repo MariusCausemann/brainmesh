@@ -40,6 +40,7 @@ class BrainLabels(NamedTuple):
     FALX: np.uint8 = np.uint8(70)
     TENTORIUM: np.uint8 = np.uint8(71)
     UNCLASSIFIED: np.uint8 = np.uint8(72)
+    SPINAL_BUFFER: np.uint8 = np.uint8(73)
     WM_HYPOINTENSITIES: np.uint8 = np.uint8(77)
 
 # Instantiate the named tuple
