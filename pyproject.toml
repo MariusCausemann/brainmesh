@@ -45,6 +45,7 @@ brainmesh-extract-csf = "brainmesh.cli:extract_csf_main"
 brainmesh-group-regions = "brainmesh.cli:group_regions_main"
 brainmesh-plot-mesh = "brainmesh.cli:plot_mesh_main"
 brainmesh-plot-facets = "brainmesh.cli:plot_facets_main"
+brainmesh-unlock-tets = "brainmesh.cli:unlock_tets"
 
 
 [project.optional-dependencies]
