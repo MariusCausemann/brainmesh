@@ -130,7 +130,7 @@ def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1):
     )
     seal = dilate(closed_mask) ^ closed_mask
     holes = binary_fill_holes(mask + seal) & ~(mask + dilate(seal, radius=1))
-    large_holes = dust(holes, threshold=500, connectivity=6)
+    large_holes = dust(holes, threshold=100, connectivity=6)
     set_mask_scalar(data, holes, Label.CSF)
     set_mask_scalar(data, large_holes, Label.UNCLASSIFIED)
     return data

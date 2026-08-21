@@ -48,7 +48,8 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         enforce_tight_ventricles,
         coarsen_surface,
         straighten_spinal_interface,
-        fill_small_unclassified_fragments
+        fill_small_unclassified_fragments,
+        VENTRICLE_LABELS
     )
 
     cfg = config or SegmentationConfig()
@@ -102,7 +103,9 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
 
     data = fill_small_unclassified_fragments(data, size=100)
 
-    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF/SAS")
+    print(f"{(np.isin(data, VENTRICLE_LABELS)).sum() * 0.5**3 *1e-3} ml Ventr.")
+
     assert data.dtype == np.uint8
     seg_out = nib.Nifti1Image(data, seg.affine)
     # We still need the grid for surface extraction
