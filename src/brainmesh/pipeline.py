@@ -173,7 +173,8 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
 
     mesh = pytetwild.tetrahedralize_pv(surf, **twild_defaults)
     mesh = mark_mesh(mesh, surf)
-    mesh.field_data["grid_z_normal"] = surf.field_data["grid_z_normal"]
+    if "grid_z_normal" in surf.field_data.keys():
+        mesh.field_data["grid_z_normal"] = surf.field_data["grid_z_normal"]
     save_mesh(mesh, out_file)
     return mesh
 
