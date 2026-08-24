@@ -9,7 +9,8 @@ from scipy.sparse.csgraph import connected_components
 
 from .decorators import time_func
 from .io import get_img
-from .labels import Label, VENTRICLE_LABELS, SAS_LABEL_OFFSET, SPINAL_ID
+from .labels import (Label, VENTRICLE_LABELS, SAS_LABEL_OFFSET, SPINAL_ID,
+                     is_csf_marker)
 
 
 @time_func
@@ -253,11 +254,10 @@ def extract_reduced_facets(reduced_tets, full_facets):
         return a.view([('', a.dtype)] * a.shape[1]).ravel()
 
     # facet connectivity (single triangle type) + point->global map
-    fcd = full_facets.cells_dict
-    tris = [t for t in fcd if t in (pv.CellType.TRIANGLE, pv.CellType.QUADRATIC_TRIANGLE)]
-    assert len(tris) == 1, "mixed facet types; fall back to the extract_cells version"
-    ttype = tris[0]
-    conn = fcd[ttype]                                          # (n, 3 or 6)
+    # (linear facet meshes are PolyData and have no cells_dict, hence _raw_faces)
+    conn = _raw_faces(full_facets)                             # (n, 3 or 6)
+    ttype = (pv.CellType.TRIANGLE if conn.shape[1] == 3
+             else pv.CellType.QUADRATIC_TRIANGLE)
     fg = (np.asarray(full_facets.point_data['gid']) if 'gid' in full_facets.point_data
           else np.arange(full_facets.n_points))               # facet-pt -> global
 
@@ -284,7 +284,12 @@ def extract_reduced_facets(reduced_tets, full_facets):
 def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs):
     """
     Extract the CSF compartment — ``Label.CSF``, all ventricles and choroid plexus,
-    and any SAS-subdivision markers (values > ``SAS_LABEL_OFFSET``).
+    and any SAS-subdivision markers (values > ``SAS_LABEL_OFFSET``); see
+    :func:`brainmesh.labels.is_csf_marker`.
+
+    ``Label.UNCLASSIFIED`` (vessels sitting in the SAS) and ``Label.SPINAL_BUFFER``
+    are *not* part of it: they stay solid, and their facets against the CSF become
+    boundaries of the extracted submesh (the buffer ones as ``SPINAL_ID``).
 
     When ``return_facets=True``, facets are computed on the **full** mesh so that
     CSF-to-tissue interfaces carry their full ``interface_id`` encoding
@@ -299,24 +304,21 @@ def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs)
                                          facets (same ``interface_id`` scheme as
                                          :func:`mark_facets`)
     **facet_kwargs                       forwarded to :func:`mark_facets`
-                                         (e.g. ``max_angle``, ``max_distance``,
-                                         ``encoding_base``)
+                                         (e.g. ``encoding_base``)
 
     Returns
     -------
     csf_mesh : pv.UnstructuredGrid
     facets   : pv.PolyData or pv.UnstructuredGrid  (only when return_facets=True)
     """
-    all_markers = np.asarray(mesh.cell_data[label_array])
-    sas_labels = np.unique(all_markers[all_markers > SAS_LABEL_OFFSET]).tolist()
-    csf_labels = list(VENTRICLE_LABELS) + [Label.CSF] + sas_labels
+    csf_cells = is_csf_marker(mesh.cell_data[label_array])
 
     if not return_facets:
-        csf_mesh = filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))
+        csf_mesh = filter_by_mask(mesh, csf_cells)
         return largest_face_connected(csf_mesh.clean())
 
     mesh["gid"] = np.arange(mesh.n_points)
-    csf_mesh = largest_face_connected(filter_by_mask(mesh, np.isin(mesh[label_array], csf_labels))).clean()
+    csf_mesh = largest_face_connected(filter_by_mask(mesh, csf_cells)).clean()
     assert "gid" in csf_mesh.array_names
     # Compute facets on the full mesh (preserves CSF-to-tissue interface IDs),
     full_facets = mark_facets(mesh, label_array=label_array, **facet_kwargs)
@@ -410,6 +412,7 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
 
     region_label_dict = {"SPINAL_CSF": 1, "PIA": 3, "LATERAL_VENTRICLES":2,
                          "FALX":4, "TENTORIUM_UPPER":5, "TENTORIUM_LOWER":6,
+                         "UNCLASSIFIED":7,
                          "ANTERIOR_PARASAGITTAL_SINUS":8,"POSTERIOR_PARASAGITTAL_SINUS":9}
 
     ids = np.asarray(facets.cell_data["interface_id"], dtype=np.int64)
@@ -421,13 +424,10 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
         region[mask & (region == 0)] = rid
 
     tent = int(Label.TENTORIUM)  # 71
-    sas_labels = np.unique(ids[ids > SAS_LABEL_OFFSET]).tolist()
-    csf_labels = VENTRICLE_LABELS + [Label.CSF] + sas_labels
 
     remove_id = int(-1)
     # remove all interfaces between different CSF regions
-    _assign(np.logical_and(np.isin(a, csf_labels),
-                           np.isin(b, csf_labels)), remove_id)
+    _assign(np.logical_and(is_csf_marker(a), is_csf_marker(b)), remove_id)
 
     # 1. Spinal canal
     _assign(ids == SPINAL_ID, region_label_dict["SPINAL_CSF"])
@@ -445,6 +445,10 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     infra_tent_ids = list(sas_region_dict["INFRATENTORIAL"])
     region[np.logical_and(a==tent, np.isin(b, infra_tent_ids))] = region_label_dict["TENTORIUM_LOWER"]
     region[np.logical_and(b==tent, np.isin(a, infra_tent_ids))] = region_label_dict["TENTORIUM_LOWER"]
+
+    # vessels and other unclassified material sitting in the SAS
+    _assign((a == Label.UNCLASSIFIED) | (b == Label.UNCLASSIFIED),
+            region_label_dict["UNCLASSIFIED"])
 
     # all remaining internal -> tissue
     _assign(ids >= encoding_base, region_label_dict["PIA"])
@@ -619,10 +623,7 @@ def mark_interface_facets(mesh, label_array="marker", encoding_base=1000,
         lo_centroids = tet_centroids[lo_parents]
         flip = np.einsum("ij,ij->i", normals, centroids - lo_centroids) < 0
 
-        if faces.shape[1] == 3:
-            faces[flip] = faces[flip][:, [0, 2, 1]]
-        else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
-            faces[flip] = faces[flip][:, [0, 2, 1, 5, 4, 3]]
+        _flip_winding(faces, flip)
 
     interface_id = lo * encoding_base + hi
 
@@ -668,139 +669,102 @@ def _build_facet_polydata(mesh, faces, scalars):
 
     return grid
 
-def mark_spinal_boundary(mesh, label_array="marker", max_angle=25.0, max_distance=10.0,
-                          csf_labels=None):
-    """
-    Mark the outer CSF boundary facets that correspond to the spinal interface.
+def _raw_faces(facet_mesh):
+    """Raw connectivity of a facet mesh: (N, 3) for linear, (N, 6) for quadratic."""
+    if isinstance(facet_mesh, pv.PolyData):
+        return facet_mesh.faces.reshape(-1, 4)[:, 1:]
+    cells = facet_mesh.cells_dict
+    for ttype in (pv.CellType.QUADRATIC_TRIANGLE, pv.CellType.TRIANGLE):
+        if ttype in cells:
+            return cells[ttype]
+    return np.empty((0, 6), dtype=np.int64)
 
-    A facet is selected when all three criteria are satisfied:
-    1. Its parent tet carries a CSF label (``csf_labels``).
-    2. Its outward normal points downward within ``max_angle`` degrees of (0, 0, -1).
-    3. Its centroid z-coordinate is within ``max_distance`` (mesh units) of the lowest
-       boundary face centroid.
+
+def _flip_winding(faces, flip):
+    """Reverse the winding of the rows selected by ``flip`` (in place)."""
+    if faces.shape[1] == 3:
+        faces[flip] = faces[flip][:, [0, 2, 1]]
+    else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
+        faces[flip] = faces[flip][:, [0, 2, 1, 5, 4, 3]]
+    return faces
+
+
+def spinal_interface_mask(region_a, region_b):
+    """
+    True where one side of a facet is ``Label.SPINAL_BUFFER`` and the other belongs
+    to the CSF compartment (see :func:`brainmesh.labels.is_csf_marker`).
+
+    ``SPINAL_BUFFER`` is the flat slab the segmentation pipeline extrudes below the
+    bottom of the image (:func:`brainmesh.anatomy.extend_brainstem_caudally`), so
+    this interface *is* the spinal opening — no geometric normal/height test needed.
+    Buffer facets against the brainstem or against ``UNCLASSIFIED`` are not spinal
+    and keep their ordinary interface id.
+    """
+    a = np.asarray(region_a)
+    b = np.asarray(region_b)
+    buf = Label.SPINAL_BUFFER
+    return ((a == buf) & is_csf_marker(b)) | ((b == buf) & is_csf_marker(a))
+
+
+def mark_spinal_boundary(mesh, label_array="marker", encoding_base=100000):
+    """
+    Mark the spinal interface: the facets between ``Label.SPINAL_BUFFER`` tets and
+    the CSF compartment.
+
+    Face winding is oriented so each normal points *out of* the CSF region, i.e.
+    down into the buffer — the same outward convention the surrounding CSF boundary
+    facets use.
 
     Parameters
     ----------
-    mesh         : pv.UnstructuredGrid  marked tetrahedral mesh
-    label_array  : str                  cell data array with region markers
-    max_angle    : float                maximum deviation (degrees) from straight down
-    max_distance : float                maximum z-distance from the lowest boundary
-                                        face centroid (in mesh units)
-    csf_labels   : array-like or None   region markers treated as CSF; defaults to
-                                        ``[Label.CSF]``
+    mesh          : pv.UnstructuredGrid  marked tetrahedral mesh
+    label_array   : str                  cell data array with region markers
+    encoding_base : int                  encoding base used while decoding the
+                                         interface ids (default 100000)
 
     Returns a :class:`pyvista.PolyData` or :class:`pyvista.UnstructuredGrid` that
-    shares the parent's point array, with a ``boundary`` cell data array.
+    shares the parent's point array, with a ``boundary`` cell data array holding the
+    marker of the CSF-side tet.
     """
-    if csf_labels is None:
-        csf_labels = [Label.CSF]
+    interfaces = mark_interface_facets(mesh, label_array=label_array,
+                                       encoding_base=encoding_base)
+    lo = np.asarray(interfaces.cell_data["region_a"])
+    hi = np.asarray(interfaces.cell_data["region_b"])
 
-    topo = _tet_face_topology(mesh)
-    points = np.asarray(mesh.points)
-    markers = np.asarray(mesh.cell_data[label_array])
+    keep = spinal_interface_mask(lo, hi)
+    faces = np.array(_raw_faces(interfaces)[keep])
+    lo, hi = lo[keep], hi[keep]
 
-    faces = topo["boundary_faces"]
-    boundary = markers[topo["boundary_parents"]].astype(np.int64)
-    print(boundary.max())
+    # mark_interface_facets winds lo -> hi, so facets where the buffer is the lower
+    # marker (against a SAS parcel) point the wrong way and need flipping.
+    _flip_winding(faces, lo == Label.SPINAL_BUFFER)
+    csf_side = np.where(lo == Label.SPINAL_BUFFER, hi, lo)
 
-    # Corner nodes are always the first 3 (same for linear and quadratic faces).
-    corners = points[faces[:, :3]]          # (N, 3, 3)
-    centroids = corners.mean(axis=1)        # (N, 3)
+    return _build_facet_polydata(mesh, faces, {"boundary": csf_side})
 
-    up_normal = np.asarray(mesh.field_data["grid_z_normal"]).flatten()
-    down_normal = -up_normal
-
-    # Compute raw face normals from corner winding order.
-    e1 = corners[:, 1] - corners[:, 0]
-    e2 = corners[:, 2] - corners[:, 0]
-    normals = np.cross(e1, e2)
-    norms = np.linalg.norm(normals, axis=1, keepdims=True)
-    normals /= np.maximum(norms, 1e-12)
-
-    # Orient normals outward: flip any that point toward their parent tet centroid.
-    tet_centroids = np.asarray(mesh.cell_centers().points)
-    parent_centroids = tet_centroids[topo["boundary_parents"]]
-    inward = np.einsum("ij,ij->i", normals, parent_centroids - centroids) > 0
-    normals[inward] *= -1
-
-    # Also flip the face winding for inward faces so the output mesh has
-    # consistently outward-oriented triangles.
-    if faces.shape[1] == 3:
-        faces[inward] = faces[inward][:, [0, 2, 1]]
-    else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
-        faces[inward] = faces[inward][:, [0, 2, 1, 5, 4, 3]]
-
-    # Criterion 1: parent tet is a CSF cell.
-    csf_mask = np.isin(boundary, csf_labels) | (boundary > SAS_LABEL_OFFSET)
-
-    # Criterion 2: outward normal within max_angle of the recovered down_normal.
-    dot_products = np.dot(normals, down_normal)
-    cos_thresh = np.cos(np.deg2rad(max_angle))
-    normal_mask = dot_products > cos_thresh
-
-    # Criterion 3: centroid projection within max_distance of the lowest boundary face.
-    # Project all centroids onto the UPWARD normal axis
-    projections = np.dot(centroids, up_normal)
-    min_proj = projections.min()
-    z_mask = projections <= min_proj + max_distance
-
-    spinal_mask = csf_mask & normal_mask & z_mask
-
-    surf = _build_facet_polydata(mesh, faces, {"boundary": spinal_mask})
-    surf = smooth_cell_labels(surf, "boundary", target_labels=[False, True])
-    # we also require CSF mask, to avoid smoothing into the brainstem outer boundary!
-    spinal_mask = surf["boundary"] & csf_mask
-
-    spinal_faces = faces[spinal_mask]
-    spinal_boundary = boundary[spinal_mask]
-
-    if len(spinal_faces) > 1:
-        # Build a compact PolyData using only corner nodes to find connected components.
-        # Works for both linear (3-node) and quadratic (6-node) faces.
-        M = len(spinal_faces)
-        corners = spinal_faces[:, :3]
-        unique_pts, inverse = np.unique(corners, return_inverse=True)
-        compact_corners = inverse.reshape(corners.shape)
-        faces_flat = np.column_stack(
-            [np.full(M, 3, dtype=np.int64), compact_corners]
-        ).ravel()
-        compact = pv.PolyData(points[unique_pts], faces=faces_flat)
-        compact.cell_data["original_id"] = np.arange(M, dtype=np.int64)
-        keep_ids = compact.extract_largest().cell_data["original_id"]
-        spinal_faces = spinal_faces[keep_ids]
-        spinal_boundary = spinal_boundary[keep_ids]
-
-    return _build_facet_polydata(mesh, spinal_faces, {"boundary": spinal_boundary})
-
-def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
-                encoding_base=100000, smooth_sas_labels=False,
-                ignore_sas_interfaces=True):
+def mark_facets(mesh, label_array="marker", encoding_base=100000,
+                smooth_sas_labels=False, ignore_sas_interfaces=True):
     """
-    Build a combined facet mesh containing all interface, boundary, and spinal facets.
+    Build a combined facet mesh containing all interface and boundary facets.
 
-    All three groups share the parent's point array. A single ``interface_id`` cell
+    Both groups share the parent's point array. A single ``interface_id`` cell
     array encodes the facet type:
 
-    * Interface facets (between two labelled regions):
-      ``min(a, b) * encoding_base + max(a, b)``
-    * Regular boundary facets (outer surface, non-spinal):
-      the region marker of the adjacent tet
-    * Spinal boundary facets (lowest CSF boundary, downward-facing):
+    * Spinal facets (``Label.SPINAL_BUFFER`` against the CSF compartment):
       ``SPINAL_ID`` (= 99)
+    * Other interface facets (between two labelled regions):
+      ``min(a, b) * encoding_base + max(a, b)``
+    * Boundary facets (outer surface):
+      the region marker of the adjacent tet
 
     Parameters
     ----------
     mesh                  : pv.UnstructuredGrid  marked tetrahedral mesh
     label_array           : str                  cell data array with region markers
-    max_angle             : float                maximum deviation (degrees) from straight down
-                                                 for spinal boundary detection
-    max_distance          : float                maximum z-distance from the lowest boundary
-                                                 face centroid for spinal boundary detection
-                                                 (in mesh units)
     encoding_base         : int                  multiplier for the interface ID encoding;
                                                  must exceed the maximum label value
                                                  (default 100000, handles SAS markers ≤ ~12035)
-    smooth_sas_labels     : bool                 if True (default), apply majority-vote smoothing
+    smooth_sas_labels     : bool                 if True, apply majority-vote smoothing
                                                  to SAS boundary labels after extraction
     ignore_sas_interfaces : bool                 if True (default), drop interfaces where both
                                                  adjacent markers are SAS subdivision labels
@@ -817,32 +781,19 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
         bnd = boundaries["boundary"]
         sas_labels = np.unique(bnd[bnd > SAS_LABEL_OFFSET]).tolist()
         boundaries = smooth_cell_labels(boundaries, marker_name="boundary", target_labels=sas_labels)
-    spinal     = mark_spinal_boundary(mesh, label_array=label_array,
-                                      max_angle=max_angle, max_distance=max_distance)
 
-    # Extract raw face arrays (N×3 for linear, N×6 for quadratic).
-    def _raw_faces(facet_mesh):
-        if isinstance(facet_mesh, pv.PolyData):
-            return facet_mesh.faces.reshape(-1, 4)[:, 1:]
-        return facet_mesh.cells_dict.get(pv.CellType.QUADRATIC_TRIANGLE,
-                                         np.empty((0, 6), dtype=np.int64))
-
-    bnd_faces = _raw_faces(boundaries)
-    bnd_ids   = boundaries.cell_data["boundary"]
-
-    # Remove spinal faces from boundaries to avoid duplicates.
-    spinal_key_set = set(map(tuple, np.sort(_raw_faces(spinal)[:, :3], axis=1).tolist()))
-    is_spinal    = np.array([tuple(r) in spinal_key_set
-                             for r in np.sort(bnd_faces[:, :3], axis=1)])
-    regular_faces = bnd_faces[~is_spinal]
-    regular_ids   = bnd_ids[~is_spinal]
-    spinal_faces  = bnd_faces[is_spinal]
-    spinal_ids    = np.full(is_spinal.sum(), SPINAL_ID, dtype=np.int64)
+    # The buffer-to-CSF interfaces are the spinal opening — re-tag them as SPINAL_ID
+    # so downstream code sees one id instead of CSF/SAS-specific encodings.
+    int_ids = np.array(interfaces.cell_data["interface_id"], dtype=np.int64)
+    int_ids[spinal_interface_mask(interfaces.cell_data["region_a"],
+                                  interfaces.cell_data["region_b"])] = SPINAL_ID
 
     int_faces = _raw_faces(interfaces)
-    all_faces = np.vstack([int_faces, regular_faces, spinal_faces]) if (
-        len(int_faces) or len(regular_faces) or len(spinal_faces)
-    ) else np.empty((0, bnd_faces.shape[1]), dtype=np.int64)
+    bnd_faces = _raw_faces(boundaries)
+    bnd_ids = boundaries.cell_data["boundary"]
+
+    all_faces = (np.vstack([int_faces, bnd_faces]) if (len(int_faces) or len(bnd_faces))
+                 else np.empty((0, bnd_faces.shape[1]), dtype=np.int64))
 
     n = len(all_faces)
     if isinstance(interfaces, pv.PolyData):
@@ -856,12 +807,7 @@ def mark_facets(mesh, label_array="marker", max_angle=10.0, max_distance=0.5,
         all_ctypes = np.full(n, pv.CellType.QUADRATIC_TRIANGLE, dtype=np.uint8)
         combined = pv.UnstructuredGrid(cells_flat, all_ctypes, mesh.points)
 
-    combined.cell_data["interface_id"] = np.concatenate([
-        interfaces.cell_data["interface_id"],
-        regular_ids,
-        spinal_ids,
-    ])
-    combined.field_data["grid_z_normal"] = mesh.field_data["grid_z_normal"]
+    combined.cell_data["interface_id"] = np.concatenate([int_ids, bnd_ids])
     return combined
 
 
@@ -897,9 +843,6 @@ def mark_boundary_facets(mesh, label_array="marker"):
         parent_centroids = tet_centroids[parents]
         flip = np.einsum("ij,ij->i", normals, centroids - parent_centroids) < 0
 
-        if faces.shape[1] == 3:
-            faces[flip] = faces[flip][:, [0, 2, 1]]
-        else:  # quadratic triangle: swap corners 1<->2 and their opposite edges
-            faces[flip] = faces[flip][:, [0, 2, 1, 5, 4, 3]]
+        _flip_winding(faces, flip)
 
     return _build_facet_polydata(mesh, faces, {"boundary": boundary})

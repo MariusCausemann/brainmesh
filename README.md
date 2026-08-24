@@ -6,7 +6,7 @@ Create tetrahedral brain meshes from FreeSurfer/SynthSeg segmentations for FEM s
 
 Starting from a labelled NIfTI segmentation (e.g. SynthSeg at 0.5 mm), `brainmesh`:
 
-1. **Cleans the segmentation** — fills CSF holes, adds falx and tentorium, repairs ventricular connectivity, fixes the brainstem/spine interface.
+1. **Cleans the segmentation** — fills CSF holes, adds falx and tentorium, repairs ventricular connectivity, fixes the brainstem/spine interface.  Two non-anatomical labels come out of this step: `UNCLASSIFIED` (72), mostly vessels sitting in the SAS, and `SPINAL_BUFFER` (73), a flat slab extruded below the bottom of the image so the spinal opening is a plain label interface rather than something that has to be found geometrically.
 2. **Extracts a multi-boundary surface mesh** using PyVista's `contour_labels`.
 3. **Tetrahedralises** the surface with fTetWild (`pytetwild`).
 4. **Marks** each tetrahedron with its anatomical label via the winding-number method.
@@ -86,7 +86,7 @@ The output carries a single `interface_id` cell array using the following scheme
 
 | `interface_id` range | Meaning | Decode |
 |---|---|---|
-| `99` | Spinal opening (`SPINAL_ID`) | — |
+| `99` | Spinal opening (`SPINAL_ID`) — the `SPINAL_BUFFER`-to-CSF interface | — |
 | `2–12035` | Outer boundary | value = adjacent region marker |
 | `≥ 100000` | Internal interface | `a, b = divmod(id, 100000)` |
 
@@ -94,7 +94,7 @@ The output carries a single `interface_id` cell array using the following scheme
 
 | Range | Meaning |
 |---|---|
-| `2–77` | FreeSurfer aseg anatomy (unchanged) |
+| `2–77` | FreeSurfer aseg anatomy (unchanged), plus `70` falx, `71` tentorium, `72` unclassified (vessels in the SAS), `73` spinal buffer |
 | `11001–11035` | LH SAS parcels — decode: `fs_aparc = marker - 10000` |
 | `12001–12035` | RH SAS parcels — decode: `fs_aparc = marker - 10000` |
 
@@ -106,10 +106,10 @@ The output carries a single `interface_id` cell array using the following scheme
 | `-o` / `--output` | `csf_mesh.vtk` | Output path for the CSF submesh |
 | `--facets` | `csf_facets.vtk` | Output path for the CSF facet mesh |
 | `--label-array` | `marker` | Cell data array used for region markers |
-| `--max-angle` | `10.0` | Max angle (degrees) from downward for spinal boundary detection |
-| `--max-distance` | `0.5` | Max z-distance from the lowest boundary face for spinal detection (mesh units) |
 
-The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, but is restricted to facets bounding the CSF compartment — including CSF-to-tissue interfaces with their full encoding (e.g. `min(CSF,WM)*100000+max(CSF,WM)`).
+The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, but is restricted to facets bounding the CSF compartment — including CSF-to-tissue interfaces with their full encoding (e.g. `min(CSF,WM)*100000+max(CSF,WM)`).  The CSF compartment is CSF, the ventricles and choroid plexus, and the SAS parcels; `UNCLASSIFIED` and `SPINAL_BUFFER` stay solid, so their facets against the CSF become boundaries of the submesh.
+
+`brainmesh-group-regions` sorts those facets into named regions (written next to the output as `<name>_labels.toml`).  Notable ids: `1` spinal opening, `2` lateral ventricles, `3` pia, `4` falx, `5`/`6` tentorium, `7` unclassified (vessel walls in the SAS), `8`/`9` parasagittal sinus, `10+` SAS lobes.
 
 `brainmesh-curve-mesh` accepts the following options:
 

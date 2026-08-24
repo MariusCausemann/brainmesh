@@ -79,6 +79,20 @@ VENTRICLE_LABELS = [
     Label.LEFT_CHOROID_PLEXUS,
 ]
 
+CSF_LABELS = VENTRICLE_LABELS + [Label.CSF]
+
+
+def is_csf_marker(markers):
+    """True where a marker belongs to the CSF compartment.
+
+    That is CSF itself, any ventricle or choroid plexus, or a SAS parcel
+    (``> SAS_LABEL_OFFSET``).  ``UNCLASSIFIED`` (vessels in the SAS) and
+    ``SPINAL_BUFFER`` are deliberately *not* part of it.
+    """
+    markers = np.asarray(markers)
+    return np.isin(markers, CSF_LABELS) | (markers > SAS_LABEL_OFFSET)
+
+
 WM_LABELS = [Label.LEFT_CEREBRAL_WHITE_MATTER, 
              Label.RIGHT_CEREBRAL_WHITE_MATTER]
 GM_LABELS = [Label.LEFT_CEREBRAL_CORTEX, 

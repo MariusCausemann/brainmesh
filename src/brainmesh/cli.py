@@ -117,7 +117,6 @@ def curve_mesh_main(argv=None):
 
     print("Converting to 2nd-order quadratic tetrahedra...")
     quad_mesh = convert_to_quadratic(input_mesh)
-    quad_mesh.field_data["grid_z_normal"] = quad_mesh.field_data["grid_z_normal"]
 
     orig_q = print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
 
@@ -153,10 +152,6 @@ def mark_facets_main(argv=None):
                         help="Output file for combined facet mesh (default: facets.vtk)")
     parser.add_argument("--label-array", default="marker",
                         help="Cell data array used for region markers (default: marker)")
-    parser.add_argument("--max-angle", type=float, default=20.0,
-                        help="Max angle (degrees) from downward for spinal boundary detection (default: 20)")
-    parser.add_argument("--max-distance", type=float, default=0.5,
-                        help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
     parser.add_argument("--no-smooth-sas-labels", action="store_true",
                         help="Disable majority-vote smoothing of SAS boundary labels")
     parser.add_argument("--keep-sas-interfaces", action="store_true",
@@ -168,7 +163,6 @@ def mark_facets_main(argv=None):
 
     mesh = read_mesh(args.mesh)
     combined = mark_facets(mesh, label_array=args.label_array,
-                           max_angle=args.max_angle, max_distance=args.max_distance,
                            smooth_sas_labels=not args.no_smooth_sas_labels,
                            ignore_sas_interfaces=not args.keep_sas_interfaces)
     save_mesh(combined, args.output)
@@ -217,10 +211,6 @@ def extract_csf_main(argv=None):
                         help="Output path for the CSF facet mesh (default: csf_facets.vtk)")
     parser.add_argument("--label-array", default="marker",
                         help="Cell data array used for region markers (default: marker)")
-    parser.add_argument("--max-angle", type=float, default=10.0,
-                        help="Max angle (degrees) from downward for spinal boundary detection (default: 10)")
-    parser.add_argument("--max-distance", type=float, default=0.5,
-                        help="Max z-distance from the lowest boundary face for spinal detection, in mesh units (default: 0.5)")
     parser.add_argument("--no-smooth-sas-labels", action="store_true",
                         help="Disable majority-vote smoothing of SAS boundary labels")
     parser.add_argument("--keep-sas-interfaces", action="store_true",
@@ -237,8 +227,6 @@ def extract_csf_main(argv=None):
         mesh,
         label_array=args.label_array,
         return_facets=True,
-        max_angle=args.max_angle,
-        max_distance=args.max_distance,
         smooth_sas_labels=not args.no_smooth_sas_labels,
         ignore_sas_interfaces=not args.keep_sas_interfaces,
     )
@@ -394,13 +382,10 @@ def unlock_tets(argv=None):
     from brainmesh.io import read_mesh, save_mesh
 
     grid = read_mesh(args.input)
-    print(grid.array_names)
-    assert "grid_z_normal" in grid.array_names
 
     out = subdivide_grid(
         grid, args.label_array, max_passes=100, verbose=True
     )
-    out.field_data["grid_z_normal"] = grid.field_data["grid_z_normal"]
 
     print(
         f"Cells: {grid.cast_to_unstructured_grid().n_cells} -> {out.n_cells}; "

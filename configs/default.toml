@@ -59,7 +59,7 @@ apply_mode_diamond_post = true   # after the post mode-box pass
 [falx]
 # Voxel gap forced between the two cerebral hemispheres. Increase if the
 # hemispheres touch through an unphysiological bridge.
-hemisphere_gap                    = 6
+hemisphere_gap                    = 5
 # Gaussian sigma used to compute soft "left territory" / "right territory"
 # scalar fields whose boundary becomes the falx.
 territory_smoothing_sigma         = 20
@@ -83,7 +83,7 @@ surrounding_csf_radius            = 1
 # Voxel gap forced between cerebrum and cerebellum.
 cerebrum_cerebellum_gap                 = 3
 # Gaussian sigma for cerebrum/cerebellum territory likelihoods.
-territory_smoothing_sigma               = 6
+territory_smoothing_sigma               = 7
 # A *broader* cerebellum prior (sigma * factor) is also computed; it
 # prevents the tentorium from cupping under the cerebellum.
 phantom_cerebellum_sigma_factor         = 3

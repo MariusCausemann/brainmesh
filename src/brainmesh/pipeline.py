@@ -47,7 +47,6 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         enforce_min_thickness,
         enforce_tight_ventricles,
         coarsen_surface,
-        straighten_spinal_interface,
         fill_small_unclassified_fragments,
         VENTRICLE_LABELS
     )
@@ -124,7 +123,6 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
 
     # Extract surface
     surf = grid.contour_labels("all", smoothing=True)
-    #surf = straighten_spinal_interface(surf, grid)
 
     # Only save surface outputs if requested
     if out_surf is not None:
@@ -173,8 +171,6 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
 
     mesh = pytetwild.tetrahedralize_pv(surf, **twild_defaults)
     mesh = mark_mesh(mesh, surf)
-    if "grid_z_normal" in surf.field_data.keys():
-        mesh.field_data["grid_z_normal"] = surf.field_data["grid_z_normal"]
     save_mesh(mesh, out_file)
     return mesh
 

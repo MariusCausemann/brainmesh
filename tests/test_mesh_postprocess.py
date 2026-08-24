@@ -4,9 +4,12 @@ import pyvista as pv
 import pytest
 
 from brainmesh import Label
+from brainmesh.labels import SPINAL_ID
 from brainmesh.mesh import (
     extract_csf,
+    group_csf_facets_by_region,
     mark_boundary_facets,
+    mark_facets,
     mark_interface_facets,
     mark_spinal_boundary,
     remark_csf_with_sas,
@@ -105,65 +108,122 @@ def test_mark_boundary_facets_split_box(split_box_mesh):
 
 
 @pytest.fixture(scope="module")
-def csf_box_mesh():
+def spinal_box_mesh():
     """
-    Box [0,2]×[0,1]×[0,1] split at z=0.5: bottom half is Label.CSF, top half is WM.
+    Box [0,2]×[0,1]×[0,1] split at z=0.25: the bottom slab is Label.SPINAL_BUFFER,
+    everything above is Label.CSF.
 
-    The expected spinal boundary is the z=0 face — outer CSF boundary with
-    downward-pointing normals.
+    The expected spinal interface is the z=0.25 plane between the two.
     """
     import pytetwild
     surf = pv.Box(bounds=(0, 2, 0, 1, 0, 1)).triangulate().subdivide(2)
     mesh = pytetwild.tetrahedralize_pv(surf, edge_length_fac=0.1, stop_energy=10, quiet=True)
     centroids = mesh.cell_centers().points
     mesh.cell_data["marker"] = np.where(
-        centroids[:, 2] < 0.5,
+        centroids[:, 2] < 0.25,
+        Label.SPINAL_BUFFER,
         Label.CSF,
-        Label.LEFT_CEREBRAL_WHITE_MATTER,
     ).astype(np.int32)
-    mesh.field_data["grid_z_normal"] = np.array([0.0, 0.0, 1.0])
     return mesh
 
 
 @pytest.mark.slow
-def test_mark_spinal_boundary_finds_bottom_csf_face(csf_box_mesh):
-    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=30.0, max_distance=0.1)
+def test_mark_spinal_boundary_finds_buffer_interface(spinal_box_mesh):
+    spinal = mark_spinal_boundary(spinal_box_mesh)
     assert spinal.n_cells > 0
-    # All selected facet centroids must be near z=0 (the bottom face).
+    # All selected facet centroids must sit on the buffer/CSF split plane.
     centroids = spinal.cell_centers().points
-    assert centroids[:, 2].max() < 0.05
-    # All selected facets must belong to the CSF region.
+    assert np.allclose(centroids[:, 2], 0.25, atol=0.1)
+    # The recorded marker is the CSF side, never the buffer.
     assert np.all(spinal.cell_data["boundary"] == Label.CSF)
 
 
 @pytest.mark.slow
-def test_mark_spinal_boundary_preserves_point_array(csf_box_mesh):
-    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=30.0, max_distance=0.1)
-    assert spinal.n_points == csf_box_mesh.n_points
-    np.testing.assert_array_equal(spinal.points, csf_box_mesh.points)
+def test_mark_spinal_boundary_preserves_point_array(spinal_box_mesh):
+    spinal = mark_spinal_boundary(spinal_box_mesh)
+    assert spinal.n_points == spinal_box_mesh.n_points
+    np.testing.assert_array_equal(spinal.points, spinal_box_mesh.points)
+
+
+@pytest.mark.parametrize("csf_marker", [Label.CSF, 11003])
+def test_mark_spinal_boundary_normals_point_out_of_csf(csf_marker):
+    """
+    Winding must give normals pointing away from the CSF and into the buffer.
+
+    Two tets sharing the z=0 face: CSF above, SPINAL_BUFFER below, so the expected
+    normal is -z.  Both marker orderings are covered: CSF (24) sorts below the
+    buffer (73), a SAS parcel (11003) above it, and only the latter needs flipping.
+    """
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0],
+                       [0, 0, 1], [0, 0, -1]], dtype=float)
+    cells = np.array([4, 0, 1, 2, 3,  4, 0, 1, 2, 4])
+    cell_types = np.array([pv.CellType.TETRA, pv.CellType.TETRA])
+    mesh = pv.UnstructuredGrid(cells, cell_types, points)
+    mesh.cell_data["marker"] = np.array([csf_marker, Label.SPINAL_BUFFER], dtype=np.int32)
+
+    spinal = mark_spinal_boundary(mesh)
+    assert spinal.n_cells == 1
+    assert spinal.cell_data["boundary"][0] == csf_marker
+
+    corners = points[spinal.faces.reshape(-1, 4)[:, 1:]]
+    normal = np.cross(corners[0, 1] - corners[0, 0], corners[0, 2] - corners[0, 0])
+    assert normal[2] < 0
 
 
 @pytest.mark.slow
-def test_mark_spinal_boundary_tight_angle_excludes_side_faces(csf_box_mesh):
-    """Side faces of the CSF region have horizontal normals and must not be selected."""
-    spinal = mark_spinal_boundary(csf_box_mesh, max_angle=10.0, max_distance=0.2)
-    if spinal.n_cells > 0:
-        centroids = spinal.cell_centers().points
-        # No selected face should have a centroid far from z=0.
-        assert centroids[:, 2].max() < 0.05
+def test_mark_spinal_boundary_ignores_non_csf_neighbours(spinal_box_mesh):
+    """A buffer facing white matter is not a spinal opening."""
+    mesh = spinal_box_mesh.copy()
+    marker = mesh.cell_data["marker"]
+    mesh.cell_data["marker"] = np.where(marker == Label.CSF,
+                                        Label.LEFT_CEREBRAL_WHITE_MATTER,
+                                        marker).astype(np.int32)
+    assert mark_spinal_boundary(mesh).n_cells == 0
 
 
 @pytest.mark.slow
-def test_mark_spinal_boundary_ignores_non_csf_labels(csf_box_mesh):
-    """With csf_labels set to WM only, the bottom face (CSF) must not be returned."""
-    spinal = mark_spinal_boundary(
-        csf_box_mesh,
-        csf_labels=[Label.LEFT_CEREBRAL_WHITE_MATTER],
-        max_angle=30.0,
-        max_distance=0.1,
-    )
-    # WM is at the top — its outer boundary faces have upward normals, not downward.
-    assert spinal.n_cells == 0
+def test_mark_spinal_boundary_without_buffer_is_empty(spinal_box_mesh):
+    """No SPINAL_BUFFER in the mesh at all -> no spinal facets."""
+    mesh = spinal_box_mesh.copy()
+    marker = mesh.cell_data["marker"]
+    mesh.cell_data["marker"] = np.where(marker == Label.SPINAL_BUFFER,
+                                        Label.BRAIN_STEM,
+                                        marker).astype(np.int32)
+    assert mark_spinal_boundary(mesh).n_cells == 0
+
+
+@pytest.mark.slow
+def test_mark_facets_tags_spinal_interface(spinal_box_mesh):
+    """mark_facets replaces the buffer/CSF encoding with SPINAL_ID."""
+    facets = mark_facets(spinal_box_mesh)
+    ids = np.asarray(facets.cell_data["interface_id"])
+    n_spinal = mark_spinal_boundary(spinal_box_mesh).n_cells
+    assert (ids == SPINAL_ID).sum() == n_spinal
+    # the raw min(24,73)*base+max(24,73) encoding must be gone
+    assert not (ids == int(Label.CSF) * 100000 + int(Label.SPINAL_BUFFER)).any()
+    # outer boundary facets keep their region marker
+    assert set(np.unique(ids)) <= {SPINAL_ID, int(Label.CSF), int(Label.SPINAL_BUFFER)}
+
+
+def test_group_csf_facets_separates_unclassified_from_pia():
+    """CSF-to-UNCLASSIFIED facets get their own region instead of falling into PIA."""
+    points = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
+                       [0, 0, 1], [1, 0, 1], [0, 1, 1]], dtype=float)
+    faces = np.hstack([[3, 0, 1, 2], [3, 1, 2, 3], [3, 4, 5, 6]])
+    facets = pv.PolyData(points, faces=faces)
+    base = 100000
+    facets.cell_data["interface_id"] = np.array([
+        int(Label.CSF) * base + int(Label.UNCLASSIFIED),      # vessel wall
+        int(Label.CSF) * base + int(Label.LEFT_CEREBRAL_CORTEX),  # pia
+        SPINAL_ID,                                            # spinal opening
+    ], dtype=np.int64)
+
+    out, region_labels = group_csf_facets_by_region(facets)
+    region = np.asarray(out.cell_data["region"])
+    assert region_labels["UNCLASSIFIED"] == 7
+    assert region.tolist() == [region_labels["UNCLASSIFIED"],
+                               region_labels["PIA"],
+                               region_labels["SPINAL_CSF"]]
 
 
 def test_remark_csf_with_sas():
