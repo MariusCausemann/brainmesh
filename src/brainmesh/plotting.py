@@ -63,6 +63,9 @@ FREESURFER_COLORS = {
     # brainmesh-specific (no FS entry — use anatomically reasonable picks)
     70:  (250/255, 128/255, 114/255),  # FALX  (salmon)
     71:  (240/255, 230/255, 140/255),  # TENTORIUM (khaki)
+    72:  (255/255, 255/255, 255/255),  # UNCLASSIFIED (black)
+    73:  (255/255, 255/255, 255/255),  # SPINAL_BUFFER (black)
+
 }
 
 VENTRICLE_COLORS = {vid: FREESURFER_COLORS[vid] for vid in VENTRICLE_LABELS
