@@ -122,7 +122,7 @@ def binary_fill_holes(img):
 @track_voxel_changes
 @time_func
 #@njit(parallel=True, cache=True)
-def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1):
+def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1, mark_unclassified=False):
     from cc3d import dust
     mask = data > 0
     closed_mask = nbmorph.close_labels_spherical(
@@ -130,9 +130,10 @@ def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1):
     )
     seal = dilate(closed_mask) ^ closed_mask
     holes = binary_fill_holes(mask + seal) & ~(mask + dilate(seal, radius=1))
-    large_holes = dust(holes, threshold=100, connectivity=6)
     set_mask_scalar(data, holes, Label.CSF)
-    set_mask_scalar(data, large_holes, Label.UNCLASSIFIED)
+    if mark_unclassified:
+        large_holes = dust(holes, threshold=100, connectivity=6)
+        set_mask_scalar(data, large_holes, Label.UNCLASSIFIED)
     return data
 
 

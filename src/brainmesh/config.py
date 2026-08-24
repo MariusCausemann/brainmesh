@@ -14,6 +14,7 @@ import tomllib
 class SolidifyCSFCfg:
     mask_closing_radius: int = 5
     mask_closing_iterations: int = 1
+    mark_unclassified: bool = False
 
 
 @dataclass
