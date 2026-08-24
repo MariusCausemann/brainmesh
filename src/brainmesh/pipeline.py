@@ -58,7 +58,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = solidify_csf(data, **asdict(cfg.solidify_csf))
     print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
-    data = close_csf_space(data, **asdict(cfg.close_csf_space))
+    data = close_csf_space(data, mark_unclassified=cfg.solidify_csf.mark_unclassified, **asdict(cfg.close_csf_space),)
     #print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = fill_wm_hyperintensities(data)
     data = cut_bottom(data, **asdict(cfg.cut_bottom))

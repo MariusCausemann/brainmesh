@@ -141,13 +141,16 @@ def solidify_csf(data, mask_closing_radius=5, mask_closing_iterations=1, mark_un
 @track_voxel_changes
 @time_func
 @njit(parallel=True, cache=True)
-def close_csf_space(data, radius=1, iter=1, brainstem_area_radius=0):
+def close_csf_space(data, radius=1, iter=1, brainstem_area_radius=0, mark_unclassified=False):
     closed_mask = nbmorph.close_labels_spherical(data > 0, radius=radius, iterations=iter)
     if brainstem_area_radius:
         brainstem_mask = dilate(data == Label.BRAIN_STEM, radius=brainstem_area_radius)
     else:
         brainstem_mask = np.ones(data.shape, dtype=np.bool_)
-    set_mask_scalar(data, closed_mask & (data == 0) & brainstem_mask, Label.UNCLASSIFIED)
+    if mark_unclassified:
+        set_mask_scalar(data, closed_mask & (data == 0) & brainstem_mask, Label.UNCLASSIFIED)
+    else:
+        set_mask_scalar(data, closed_mask & (data == 0) & brainstem_mask, Label.CSF)
     return data
 
 
