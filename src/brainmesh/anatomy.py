@@ -143,7 +143,7 @@ def create_falx(
 def create_tentorium(
     data,
     cerebrum_cerebellum_gap=4,
-    territory_smoothing_sigma=6,
+    territory_smoothing_sigma=7,
     phantom_cerebellum_sigma_factor=3,
     boundary_thickness_radius=1,
     cerebrum_cerebellum_proximity_radius=12,

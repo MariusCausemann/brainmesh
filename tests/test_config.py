@@ -37,7 +37,7 @@ class TestDefaults:
     def test_tentorium_defaults(self):
         cfg = SegmentationConfig()
         assert cfg.tentorium.cerebrum_cerebellum_gap == 3
-        assert cfg.tentorium.territory_smoothing_sigma == 6.0
+        assert cfg.tentorium.territory_smoothing_sigma == 7.0
         assert cfg.tentorium.phantom_cerebellum_sigma_factor == 3.0
         assert cfg.tentorium.brainstem_clearance_radius == 10
 
