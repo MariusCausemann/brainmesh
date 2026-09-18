@@ -169,7 +169,7 @@ surf = segmentation_to_surface("testdata/sub1.nii.gz",
 
 # Or override individual fields programmatically
 cfg = SegmentationConfig()
-cfg.falx.hemisphere_gap = 8
+cfg.falx. = 8
 cfg.tentorium.territory_smoothing_sigma = 15.0
 surf = segmentation_to_surface("testdata/sub1.nii.gz", config=cfg)
 

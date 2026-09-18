@@ -38,6 +38,7 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         solidify_csf, close_csf_space,
         fill_wm_hyperintensities, cut_bottom, extend_brainstem,
         enforce_csf_layer,
+        count_background_contacts,
         create_falx, create_tentorium,
         enforce_csf_around_tentorium, enforce_csf_around_falx,
         extend_brainstem_caudally,
@@ -69,9 +70,13 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
 
     orig_mask = nbm.smooth_labels_spherical(data > 0,
                                             radius=cfg.misc.original_mask_smoothing_radius)
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF pre-modebox, pre")
     if cfg.misc.apply_mode_box_pre:
         data = nbm.mode_box(data)
         data[~orig_mask] = 0
+
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF pre-modebox, post")
+
     assert data.dtype == np.uint8 
     data = create_falx(data, **asdict(cfg.falx))
     data = create_tentorium(data, **asdict(cfg.tentorium))
@@ -89,11 +94,16 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
 
     data[~orig_mask] = 0
 
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF post-modebox, pre")
+
     if cfg.misc.apply_mode_box_post:
         data = nbm.mode_box(data)
     if cfg.misc.apply_mode_diamond_post:
         data = nbm.mode_diamond(data)
     data[~orig_mask] = 0
+
+    print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF post-modebox, pre")
+
     assert data.dtype == np.uint8
     data = enforce_csf_around_tentorium(data, **asdict(cfg.csf_around_tentorium))
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
@@ -101,6 +111,12 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
 
     data = fill_small_unclassified_fragments(data, size=100)
+
+    n_contacts = count_background_contacts(data)
+    assert n_contacts == 0, (
+        f"{n_contacts} background voxels are 26-adjacent to parenchyma -- the CSF "
+        "layer has holes and contour_labels will produce PAR/background patches"
+    )
 
     print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF/SAS")
     print(f"{(np.isin(data, VENTRICLE_LABELS)).sum() * 0.5**3 *1e-3} ml Ventr.")

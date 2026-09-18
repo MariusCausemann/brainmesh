@@ -258,6 +258,29 @@ def enforce_csf_layer(data, thickness=1):
     return set_mask_scalar(data, dilated_mask > mask, Label.CSF)
 
 
+def count_background_contacts(data):
+    """Background voxels 26-adjacent to parenchyma -- must be 0 after enforce_csf_layer.
+
+    ``contour_labels`` meshes voxel corners, so a single corner contact between the
+    background and the parenchyma opens a spurious PAR/background patch. This is why
+    ``enforce_csf_layer`` dilates with a box ("B") element: one iteration covers the
+    full 26-neighbourhood, which is the thinnest layer that closes corner contacts.
+
+    The spinal buffer is excluded: ``extend_brainstem_caudally`` runs after
+    ``enforce_csf_layer`` and deliberately leaves it open at the caudal cut plane.
+    """
+    par = (
+        (data > 0)
+        & (data != Label.CSF)
+        & (data != Label.TENTORIUM)
+        & (data != Label.FALX)
+        & (data != Label.BRAIN_STEM)
+        & (data != Label.UNCLASSIFIED)
+        & (data != Label.SPINAL_BUFFER)
+    )
+    return (dilate(par, radius=1, struct_sequence="B") & (data == 0)).sum()
+
+
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func

@@ -59,7 +59,7 @@ apply_mode_diamond_post = true   # after the post mode-box pass
 [falx]
 # Voxel gap forced between the two cerebral hemispheres. Increase if the
 # hemispheres touch through an unphysiological bridge.
-hemisphere_gap                    = 5
+hemisphere_gap                    = 4
 # Gaussian sigma used to compute soft "left territory" / "right territory"
 # scalar fields whose boundary becomes the falx.
 territory_smoothing_sigma         = 20

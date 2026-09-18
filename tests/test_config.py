@@ -27,7 +27,7 @@ class TestDefaults:
 
     def test_falx_defaults(self):
         cfg = SegmentationConfig()
-        assert cfg.falx.hemisphere_gap == 6
+        assert cfg.falx.hemisphere_gap == 4
         assert cfg.falx.territory_smoothing_sigma == 20.0
         assert cfg.falx.cerebrum_proximity_radius == 25
         assert cfg.falx.non_cerebral_clearance_radius == 4

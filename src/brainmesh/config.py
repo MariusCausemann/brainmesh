@@ -42,7 +42,7 @@ class EnforceCSFLayerCfg:
 
 @dataclass
 class FalxCfg:
-    hemisphere_gap: int = 5
+    hemisphere_gap: int = 4
     territory_smoothing_sigma: float = 20.0
     boundary_thickness_radius: int = 1
     cerebrum_proximity_radius: int = 25
