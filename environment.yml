@@ -2,7 +2,7 @@ name: brainmesh
 channels:
   - conda-forge
 dependencies:
-  - python
+  - python=*=*cpython*
   - pip
   - scikit-image
   - numpy
