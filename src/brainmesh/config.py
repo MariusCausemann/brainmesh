@@ -49,6 +49,16 @@ class FalxCfg:
     non_cerebral_clearance_radius: int = 4
     cerebellum_clearance_radius: int = 2
     third_ventricle_clearance_radius: int = 30
+    core_hull_band_radius: int = 20
+    core_hull_clearance_radius: int = 4
+    core_hull_clearance_anterior: int = 12
+    core_hull_extend_inferior: bool = True
+    core_hull_sweep_curvature: float = -12.0
+    core_hull_smoothing_sigma: float = 6.0
+    depth_limit_anterior: float = 30.0
+    depth_limit_posterior: float = 100.0
+    depth_limit_taper_start_angle: float = 45.0
+    depth_limit_taper_end_angle: float = -30.0
     surrounding_csf_radius: int = 1
 
 

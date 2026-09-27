@@ -82,6 +82,113 @@ def enforce_wm_thickness(data, thickness=1):
     return data
 
 
+FALX_CORE_LABELS = [
+    Label.LEFT_LATERAL_VENTRICLE,
+    Label.RIGHT_LATERAL_VENTRICLE,
+    Label.LEFT_CHOROID_PLEXUS,
+    Label.RIGHT_CHOROID_PLEXUS,
+    Label.THIRD_VENTRICLE,
+    Label.LEFT_THALAMUS,
+    Label.RIGHT_THALAMUS,
+    Label.LEFT_CAUDATE,
+    Label.RIGHT_CAUDATE,
+    Label.LEFT_ACCUMBENS_AREA,
+    Label.RIGHT_ACCUMBENS_AREA,
+    Label.LEFT_VENTRAL_DC,
+    Label.RIGHT_VENTRAL_DC,
+]
+
+
+def _core_hull_mask(data, falx_mask, cc_interface, band_radius=20, clearance_radius=4,
+                    extend_inferior=True, clearance_anterior=None, sweep_curvature=-12.0,
+                    smoothing_sigma=6.0):
+    """Sagittal convex hull of the deep core (CC, ventricles, basal nuclei),
+    dilated by a clearance and extruded along axis 0 (left-right).
+
+    Only core voxels within `band_radius` of the falx candidate enter the
+    hull, so laterally placed parts (e.g. the atria) do not inflate it.
+    With `extend_inferior`, the hull anterior of the CC centroid is swept
+    down to the bottom of the image, removing the pocket below the genu down
+    to the skull base. The sweep bends along a parabola, shifting
+    `sweep_curvature` voxels anteriorly (negative: posteriorly) 50 voxels
+    below its start.
+    If `clearance_anterior` is given, the clearance grows with a cosine
+    profile from `clearance_radius` posterior (180 deg around the CC
+    centroid) to `clearance_anterior` anterior (0 deg), so the free edge sits
+    higher above the genu than above the splenium. The result is smoothed
+    with a Gaussian of `smoothing_sigma` to round off its corners.
+    """
+    from scipy.ndimage import distance_transform_edt, gaussian_filter
+    from skimage.morphology import convex_hull_image
+
+    core = np.isin(data, FALX_CORE_LABELS) | cc_interface
+    core &= dilate(falx_mask, radius=band_radius)
+    proj = core.any(axis=0)
+    if proj.sum() < 3:
+        return np.zeros_like(falx_mask)
+    hull = convex_hull_image(proj)
+    ny, nz = hull.shape
+    has_cc = cc_interface.any()
+    if has_cc:
+        yc, zc = np.argwhere(cc_interface.any(axis=0)).mean(axis=0)
+    if extend_inferior and has_cc:
+        anterior = hull.copy()
+        anterior[: int(yc)] = False
+        # axis 2 is I->S: hull[y, z] is swept to (y + shift(dz), z - dz)
+        for dz in range(1, nz):
+            shift = int(round(sweep_curvature * (dz / 50) ** 2))
+            if abs(shift) >= ny:
+                break
+            if shift >= 0:
+                hull[shift:, : nz - dz] |= anterior[: ny - shift, dz:]
+            else:
+                hull[: ny + shift, : nz - dz] |= anterior[-shift:, dz:]
+    clearance = clearance_radius
+    if clearance_anterior is not None and has_cc:
+        y, z = np.meshgrid(np.arange(ny) - yc, np.arange(nz) - zc, indexing="ij")
+        angle = np.abs(np.arctan2(z, y))  # 0 anterior, pi posterior
+        clearance = clearance_radius + (clearance_anterior - clearance_radius) * (
+            0.5 + 0.5 * np.cos(angle))
+    hull = distance_transform_edt(~hull) <= clearance
+    if smoothing_sigma > 0:
+        hull = gaussian_filter(hull.astype(np.float32), smoothing_sigma) > 0.5
+    return np.broadcast_to(hull, data.shape)
+
+
+def _falx_depth_mask(
+    data,
+    cc_interface,
+    depth_limit_anterior=30,
+    depth_limit_posterior=100,
+    taper_start_angle=45.0,
+    taper_end_angle=-30.0,
+):
+    """Sickle-shaped depth limit for the falx.
+
+    Depth is the distance to the outer boundary (data == 0). The limit
+    depends on the sagittal polar angle around the corpus callosum centroid
+    (0 = anterior, 90 = superior, 180 = posterior; axes 1/2 = P->A/I->S): it
+    is `depth_limit_posterior` above `taper_start_angle`, falls off with a
+    cosine taper to `depth_limit_anterior` at `taper_end_angle`, and stays
+    there further anterior-inferior.
+    """
+    import edt
+
+    if not cc_interface.any():
+        return np.ones(data.shape, dtype=bool)
+    yc, zc = np.argwhere(cc_interface.any(axis=0)).mean(axis=0)
+    y, z = np.meshgrid(np.arange(data.shape[1]) - yc, np.arange(data.shape[2]) - zc,
+                       indexing="ij")
+    angle = np.degrees(np.arctan2(z, y))
+    angle[angle < -90] += 360  # posterior-inferior continues past 180
+    f = np.clip((angle - taper_end_angle) / (taper_start_angle - taper_end_angle), 0, 1)
+    limit = depth_limit_anterior + (depth_limit_posterior - depth_limit_anterior) * (
+        0.5 - 0.5 * np.cos(np.pi * f))
+
+    depth = edt.edt(data > 0, parallel=0)
+    return depth <= limit[None]
+
+
 @plot_voxel_changes(num_samples=4, window_radius=12)
 @track_voxel_changes
 @time_func
@@ -94,6 +201,16 @@ def create_falx(
     non_cerebral_clearance_radius=4,
     cerebellum_clearance_radius=2,
     third_ventricle_clearance_radius=30,
+    core_hull_band_radius=20,
+    core_hull_clearance_radius=4,
+    core_hull_clearance_anterior=12,
+    core_hull_extend_inferior=True,
+    core_hull_sweep_curvature=-12.0,
+    core_hull_smoothing_sigma=6.0,
+    depth_limit_anterior=30,
+    depth_limit_posterior=100,
+    depth_limit_taper_start_angle=45.0,
+    depth_limit_taper_end_angle=-30.0,
     surrounding_csf_radius=1,
 ):
     from .gaussian import gaussian
@@ -130,6 +247,34 @@ def create_falx(
     cerebellum_mask = np.isin(data, [Label.LEFT_CEREBELLUM_CORTEX, Label.RIGHT_CEREBELLUM_CORTEX])
     falx_mask[dilate(cerebellum_mask, radius=cerebellum_clearance_radius)] = 0
     falx_mask[dilate(data == Label.THIRD_VENTRICLE, radius=third_ventricle_clearance_radius)] = 0
+
+    # The exclusions above follow the outline of the deep structures, so the
+    # falx wraps around the genu into the subcallosal pocket. Exclude the
+    # sagittal convex hull of the deep core near the midline instead, swept
+    # down to the skull base along a backward-bending curve anterior of the
+    # CC centroid, and smoothed.
+    # Assumes RAS voxel order (axis 0 = left-right), as given by get_img.
+    if core_hull_clearance_radius >= 0:
+        falx_mask &= ~_core_hull_mask(data, falx_mask, cc_interface,
+                                      band_radius=core_hull_band_radius,
+                                      clearance_radius=core_hull_clearance_radius,
+                                      extend_inferior=core_hull_extend_inferior,
+                                      clearance_anterior=(core_hull_clearance_anterior
+                                                          if core_hull_clearance_anterior >= 0
+                                                          else None),
+                                      sweep_curvature=core_hull_sweep_curvature,
+                                      smoothing_sigma=core_hull_smoothing_sigma)
+
+    # The falx deepens towards the straight sinus. Cap its depth below the
+    # outer surface with a limit that tapers along the sagittal angle around
+    # the CC, which smooths the free edge above the genu.
+    if depth_limit_anterior >= 0:
+        falx_mask &= _falx_depth_mask(data, cc_interface,
+                                      depth_limit_anterior=depth_limit_anterior,
+                                      depth_limit_posterior=depth_limit_posterior,
+                                      taper_start_angle=depth_limit_taper_start_angle,
+                                      taper_end_angle=depth_limit_taper_end_angle)
+
     falx_mask = cc3d.dust(falx_mask, threshold=500, connectivity=6)
 
     data[falx_mask] = Label.FALX

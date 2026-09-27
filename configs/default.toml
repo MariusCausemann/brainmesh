@@ -74,6 +74,36 @@ non_cerebral_clearance_radius     = 4
 cerebellum_clearance_radius       = 2
 # Falx is suppressed within this margin of the third ventricle.
 third_ventricle_clearance_radius  = 30
+# The deep core (corpus callosum, lateral/third ventricles, choroid plexus,
+# thalamus, caudate, accumbens, ventral DC) within core_hull_band_radius of
+# the falx is projected onto the sagittal plane; its convex hull, dilated by
+# core_hull_clearance_radius, is removed from the falx. With
+# core_hull_extend_inferior, the core anterior of the CC centroid is first
+# swept down to the skull base, removing the pocket below the genu the falx
+# otherwise wraps into. Negative clearance disables.
+# The clearance (the gap between the CC and the falx free edge) grows from
+# core_hull_clearance_radius posterior (splenium) to
+# core_hull_clearance_anterior anterior (genu); negative anterior value keeps
+# it uniform.
+core_hull_band_radius             = 20
+core_hull_clearance_radius        = 4
+core_hull_clearance_anterior      = 12
+core_hull_extend_inferior         = true
+# The downward sweep bends along a parabola, shifting this many
+# voxels anteriorly 50 voxels below its start (negative: posteriorly).
+core_hull_sweep_curvature         = -12
+# Gaussian sigma (voxels) used to round off the corners of the exclusion.
+core_hull_smoothing_sigma         = 6
+# Depth limit (voxels) below the outer boundary, set by the sagittal angle
+# around the CC centroid (0 = anterior, 90 = superior, 180 = posterior):
+# depth_limit_posterior above taper_start_angle, a cosine taper down to
+# depth_limit_anterior at taper_end_angle, and depth_limit_anterior beyond.
+# Smooths the free edge above the genu. Negative depth_limit_anterior
+# disables.
+depth_limit_anterior              = 30
+depth_limit_posterior             = 100
+depth_limit_taper_start_angle     = 45
+depth_limit_taper_end_angle       = -30
 # Thickness of the CSF jacket around the new falx label.
 surrounding_csf_radius            = 1
 
