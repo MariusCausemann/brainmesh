@@ -101,15 +101,48 @@ def curve_mesh_main(argv=None):
     parser = argparse.ArgumentParser(
         description="Convert linear tetrahedra to quadratic and snap boundaries to a target surface."
     )
-    parser.add_argument("-i", "--input", type=str, required=True,
-                        help="Path to input linear tetrahedral mesh (.vtk, .vtu, ...)")
-    parser.add_argument("-t", "--target", type=str, required=True,
-                        help="Path to target high-res surface mesh (.vtk, .stl, .ply, .obj, ...)")
-    parser.add_argument("-o", "--output", type=str, default="snapped_output.vtk",
-                        help="Path to save the output mesh (default: snapped_output.vtk)")
-    parser.add_argument("--min-quality-factor", type=float, default=0.9,
-                        help="Minimum allowed quality as a fraction of the original mesh's"
-                             " minimum quality (default: 0.9)")
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        required=True,
+        help="Path to input linear tetrahedral mesh (.vtk, .vtu, ...)",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        type=str,
+        required=True,
+        help="Path to target high-res surface mesh (.vtk, .stl, .ply, .obj, ...)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="snapped_output.vtk",
+        help="Path to save the output mesh (default: snapped_output.vtk)",
+    )
+    parser.add_argument(
+        "--floor-factor",
+        type=float,
+        default=0.5,
+        help="Each cell may drop to this fraction of its original quality (default: 0.5)",
+    )
+    parser.add_argument(
+        "--abs-floor",
+        type=float,
+        default=0.1,
+        help="...but not below this absolute quality, unless it started"
+        " lower, in which case it may not degrade (default: 0.1)",
+    )
+    parser.add_argument(
+        "--steps", type=int, default=10, help="Number of incremental snapping steps (default: 10)"
+    )
+    parser.add_argument(
+        "--label-array",
+        default="marker",
+        help="Cell data array with region markers (default: marker)",
+    )
     args = parser.parse_args(argv)
 
     from brainmesh.curved_mesh import (
@@ -118,7 +151,6 @@ def curve_mesh_main(argv=None):
         print_quality_stats,
         straighten_inverted_cells,
     )
-    from .mesh_optimizer import run_mesh_optimization
     from brainmesh.io import read_mesh, save_mesh
 
     input_mesh = read_mesh(args.input)
@@ -129,36 +161,28 @@ def curve_mesh_main(argv=None):
     print("Converting to 2nd-order quadratic tetrahedra...")
     quad_mesh = convert_to_quadratic(input_mesh)
 
-    orig_q = print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
+    print_quality_stats(quad_mesh, "2. Unsnapped Quadratic Mesh")
 
     print("Snapping boundary nodes to target surface...")
-    all_boundary_ids = adaptive_snap_boundaries(quad_mesh, target_surface,
-                              min_quality=orig_q.min() * args.min_quality_factor,
-                              decay_step=0.1)
-    print_quality_stats(quad_mesh, "3. Snapped Quadratic Mesh")
-
-    print("Optimizing Internal Nodes...")
-
-    # Pass the mesh and the boundary IDs to freeze
-    quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=all_boundary_ids, iters=20,
-                                      target_quality=0.2, step_factor=0.1)
-
-    final_q = print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
+    adaptive_snap_boundaries(
+        quad_mesh,
+        target_surface,
+        label_array=args.label_array,
+        floor_factor=args.floor_factor,
+        abs_floor=args.abs_floor,
+        n_steps=args.steps,
+    )
+    final_q = print_quality_stats(quad_mesh, "3. Snapped Quadratic Mesh")
 
     if final_q.min() <= 0:
         print("Inverted cells remain; straightening their mid-edge nodes...")
         straighten_inverted_cells(quad_mesh)
-        final_q = print_quality_stats(quad_mesh, "5. Repaired Quadratic Mesh")
+        final_q = print_quality_stats(quad_mesh, "4. Repaired Quadratic Mesh")
     if final_q.min() <= 0:
         raise SystemExit(
             f"ERROR: curved mesh still has {int((final_q <= 0).sum())} inverted cells "
             f"(min scaled Jacobian {final_q.min():.4f}); not writing {args.output}."
         )
-
-    #quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=[], iters=2,
-    #                                  target_quality=0.08, step_factor=0.1)
-
-    #print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
 
     save_mesh(quad_mesh, args.output)
     print(f"Success! Snapped mesh saved to: {args.output}")

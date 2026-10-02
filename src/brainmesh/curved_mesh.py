@@ -2,7 +2,8 @@ import pyvista as pv
 import numpy as np
 import vtk
 
-from .mesh import mark_interface_facets
+from .labels import SAS_LABEL_OFFSET
+from .mesh import _tet_face_topology
 
 
 def convert_to_quadratic(tet_mesh: pv.UnstructuredGrid) -> pv.UnstructuredGrid:
@@ -110,120 +111,229 @@ def compute_quadratic_quality(mesh):
     return min_jacobians
 
 
+def _pair_codes(lo, hi):
+    """Encode unordered label pairs as int64 keys."""
+    lo, hi = np.asarray(lo, dtype=np.int64), np.asarray(hi, dtype=np.int64)
+    return (np.minimum(lo, hi) << 32) | np.maximum(lo, hi)
+
+
+def boundary_facets(quad_mesh: pv.UnstructuredGrid, label_array: str = "marker"):
+    """6-node boundary facets of a quadratic tet mesh and their label pairs.
+
+    Returns ``(faces, codes)``: ``faces`` (F, 6) holds the external facets followed by
+    the interfaces between cells of different ``label_array`` value (SAS-SAS interfaces
+    are skipped, as in ``mark_interface_facets``). ``codes`` encodes each facet's
+    ``(region, region)`` pair (``0`` for the outside) with ``_pair_codes``, or is None
+    when the mesh carries no ``label_array``.
+    """
+    topo = _tet_face_topology(quad_mesh)
+    if label_array not in quad_mesh.cell_data:
+        return topo["boundary_faces"], None
+    markers = np.asarray(quad_mesh.cell_data[label_array]).astype(np.int64)
+    a = markers[topo["interface_parents_a"]]
+    b = markers[topo["interface_parents_b"]]
+    keep = (a != b) & (np.minimum(a, b) <= SAS_LABEL_OFFSET)
+    faces = np.vstack([topo["boundary_faces"], topo["interface_faces"][keep]])
+    ext = markers[topo["boundary_parents"]]
+    codes = np.concatenate([_pair_codes(np.zeros_like(ext), ext), _pair_codes(a[keep], b[keep])])
+    return faces, codes
+
+
+def project_to_labelled_sheets(
+    points, faces, codes, target_surface, target_label_array="boundary_labels"
+):
+    """Closest point on the target for every node of ``faces``.
+
+    Each node is projected only onto the target sheets whose ``target_label_array``
+    pair matches the label pair of one of its facets; a node on several sheets (a
+    junction) goes to the nearest of them. Nodes with no matching sheet keep their
+    position and are flagged in ``found``. Without labels on either side, every node is
+    projected onto the whole target.
+
+    Returns ``(node_ids, closest, found)``.
+    """
+    node_ids = np.unique(faces)
+    if codes is None or target_label_array not in target_surface.cell_data:
+        _, closest = target_surface.find_closest_cell(points[node_ids], return_closest_point=True)
+        return node_ids, closest, np.ones(len(node_ids), dtype=bool)
+
+    labels = np.asarray(target_surface.cell_data[target_label_array])
+    target_codes = _pair_codes(labels[:, 0], labels[:, 1])
+
+    # unique (node, code) memberships
+    pairs = np.unique(np.column_stack([faces.ravel(), np.repeat(codes, faces.shape[1])]), axis=0)
+    pair_node = np.searchsorted(node_ids, pairs[:, 0])
+
+    closest = points[node_ids].copy()
+    best = np.full(len(node_ids), np.inf)
+    order = np.argsort(target_codes, kind="stable")
+    sorted_codes = target_codes[order]
+    missing = []
+    for code in np.unique(pairs[:, 1]):
+        lo, hi = np.searchsorted(sorted_codes, [code, code + 1])
+        sel = pair_node[pairs[:, 1] == code]
+        if lo == hi:
+            missing.append((int(code >> 32), int(code & 0xFFFFFFFF), len(sel)))
+            continue
+        sheet = target_surface.extract_cells(order[lo:hi])
+        _, cp = sheet.find_closest_cell(points[node_ids[sel]], return_closest_point=True)
+        dist = np.linalg.norm(cp - points[node_ids[sel]], axis=1)
+        better = dist < best[sel]
+        best[sel[better]] = dist[better]
+        closest[sel[better]] = cp[better]
+
+    found = np.isfinite(best)
+    if missing:
+        print(
+            f"  -> {int((~found).sum())} boundary nodes have no matching target sheet and"
+            f" stay put; missing label pairs (lo, hi, nodes): {missing}"
+        )
+    return node_ids, closest, found
+
+
 def adaptive_snap_boundaries(
-    quad_mesh: pv.UnstructuredGrid, 
+    quad_mesh: pv.UnstructuredGrid,
     target_surface: pv.PolyData,
     label_array: str = "marker",
+    target_label_array: str = "boundary_labels",
     only_high_order: bool = False,
-    min_quality: float = 0.09,
-    max_iters: int = 10,
-    decay_step: float = 0.2
+    floor_factor: float = 0.5,
+    abs_floor: float = 0.1,
+    n_steps: int = 10,
+    max_steps: int | None = None,
+    smooth_sweeps: int = 3,
+    max_halvings: int = 3,
+    relax_iters: int = 5,
 ):
+    """Moves boundary nodes onto the target surface step by step, never breaking a cell.
+
+    Every cell gets a quality floor ``min(q0, max(floor_factor * q0, abs_floor))``, where
+    ``q0`` is its quality before snapping. In each step every boundary node that has not
+    reached the target tries to advance by ``1 / n_steps`` of its displacement; a node
+    whose advance would push an adjacent cell below its floor halves its increment, up to
+    ``max_halvings`` times, and otherwise stays put and retries in the next step. After
+    each step the interior displacement is smoothed so that interior nodes follow the
+    boundary, and the free nodes of the cells that blocked a node are relaxed by a
+    pattern search to make room for the next step. Stepping stops once no node can advance or after
+    ``max_steps`` (default ``2 * n_steps``) steps. With ``only_high_order``, corner nodes
+    never move, so only the mid-edge nodes curve.
+
+    Returns the ids of all boundary nodes.
     """
-    Snaps boundary nodes to a target surface adaptively. If an element inverts or falls
-    below the required min quality, it iteratively retracts the snapped nodes of that
-    element by `decay_step` until the quality requirement is met.
-    """
+    from .mesh_optimizer import (
+        build_node_to_cell_map,
+        cell_qualities,
+        cells_of_nodes,
+        quality_shape_grads,
+        relax_nodes,
+        smooth_interior_displacement,
+    )
+
     print("Extracting boundary nodes...")
-    global_id_name = "GlobalNodeID"
-    quad_mesh.point_data[global_id_name] = np.arange(quad_mesh.n_points)
-    
-    # 1. Gather External Boundary IDs
-    surf = quad_mesh.extract_surface(algorithm='dataset_surface')
-    ext_boundary_ids = surf.point_data[global_id_name]
-    
-    # 2. Gather Internal Interface IDs
-    int_boundary_ids = np.array([], dtype=int)
-    if label_array in quad_mesh.cell_data:
-        interface_facets = mark_interface_facets(quad_mesh, label_array=label_array)
-        if interface_facets.n_cells > 0:
-            # Connectivity lives in `.faces` for PolyData (linear facets) and `.cells`
-            # for UnstructuredGrid (quadratic facets); both follow the VTK stride layout.
-            conn = (interface_facets.faces if isinstance(interface_facets, pv.PolyData)
-                    else interface_facets.cells)
-            nodes_per_face = conn[0]
-            faces = conn.reshape(-1, nodes_per_face + 1)[:, 1:]
-            int_boundary_ids = np.unique(faces)
-            
-    all_boundary_ids = np.unique(np.concatenate((ext_boundary_ids, int_boundary_ids)))
-    
-    # 3. Apply high-order topological filter if requested
+    faces, codes = boundary_facets(quad_mesh, label_array)
+    if len(faces) == 0:
+        return np.array([], dtype=int)
+
+    cells = np.ascontiguousarray(quad_mesh.cells.reshape(-1, 11)[:, 1:], dtype=np.int64)
+    n_cells, n_points = len(cells), quad_mesh.n_points
+    points = np.asarray(quad_mesh.points, dtype=np.float64).copy()
+    ref_points = points.copy()
+
+    all_boundary_ids, closest, found = project_to_labelled_sheets(
+        points, faces, codes, target_surface, target_label_array
+    )
+    move = found.copy()
     if only_high_order:
-        cells = quad_mesh.cells.reshape(-1, 11)
-        corner_ids = np.unique(cells[:, 1:5])
-        all_boundary_ids = np.setdiff1d(all_boundary_ids, corner_ids)
-        
-    del quad_mesh.point_data[global_id_name]
-    
-    if len(all_boundary_ids) == 0:
-        return
-        
-    #  SNAPPING LOGIC
-    # calculate the starting and target coordinates
-    P_orig = quad_mesh.points[all_boundary_ids].copy()
-    _, P_target = target_surface.find_closest_cell(P_orig, return_closest_point=True)
-    
-    # Initialize the interpolation weight alpha for each node (1.0 = fully snapped)
-    alpha = np.ones(len(all_boundary_ids))
-    
-    # reverse-lookup array: Global Point ID -> Index in boundary array
-    p2b = np.full(quad_mesh.n_points, -1)
-    p2b[all_boundary_ids] = np.arange(len(all_boundary_ids))
-    
-    # Extract raw cell definitions
-    raw_cells = quad_mesh.cells.reshape(-1, 11)[:, 1:]
-    
-    # max_iters relaxations plus a final check, so the state after the last relaxation is
-    # evaluated too (the loop used to stop right after relaxing, unchecked).
-    for i in range(max_iters + 1):
-        # Update the mesh points using the current alpha weights
-        quad_mesh.points[all_boundary_ids] = P_orig + alpha[:, np.newaxis] * (P_target - P_orig)
+        move &= ~np.isin(all_boundary_ids, cells[:, :4])
+    ids = all_boundary_ids[move]
+    P0, D = points[ids], closest[move] - points[ids]
 
-        # Compute the quality
-        qualities = compute_quadratic_quality(quad_mesh)
-        bad_tet_idx = np.where(qualities < min_quality)[0]
+    grads = quality_shape_grads()
+    offsets, data = build_node_to_cell_map(n_points, cells)
+    q0 = cell_qualities(np.arange(n_cells), cells, points, grads)
+    floor = np.minimum(q0, np.maximum(floor_factor * q0, abs_floor)) - 1e-9
 
-        if len(bad_tet_idx) == 0:
-            print(f"  -> Adaptive snapping converged successfully at iteration {i+1}!")
+    # Local corner-edge length, for the smoothing tolerance and the relaxation step
+    corners = points[cells[:, :4]]
+    h_cell = np.mean(
+        [
+            np.linalg.norm(corners[:, a] - corners[:, b], axis=1)
+            for a, b in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+        ],
+        axis=0,
+    )
+    h_node = np.full(n_points, np.inf)
+    for j in range(10):
+        np.minimum.at(h_node, cells[:, j], h_cell)
+    tol = 1e-3 * h_node
+    is_free = np.ones(n_points, dtype=bool)
+    is_free[all_boundary_ids] = False
+    if only_high_order:
+        is_free[cells[:, :4]] = False
+    free_ids = np.nonzero(is_free)[0]
+
+    alpha = np.zeros(len(ids))
+    max_steps = 2 * n_steps if max_steps is None else max_steps
+    for step in range(max_steps):
+        cand = np.nonzero(alpha < 1.0)[0]
+        if len(cand) == 0:
+            break
+        inc = np.minimum(1.0 / n_steps, 1.0 - alpha[cand])
+        min_inc = inc * 0.5**max_halvings
+        points[ids[cand]] = P0[cand] + (alpha[cand] + inc)[:, None] * D[cand]
+
+        # Halve the increment of every advancing node of a cell that fell below its
+        # floor; after max_halvings the node stays put. The state before the step
+        # satisfied all floors, so this terminates.
+        moving = np.ones(len(cand), dtype=bool)
+        blocked = np.zeros(n_cells, dtype=bool)
+        while moving.any():
+            check = cells_of_nodes(ids[cand[moving]], offsets, data, n_cells)
+            q = cell_qualities(check, cells, points, grads)
+            bad = check[q < floor[check]]
+            if len(bad) == 0:
+                break
+            blocked[bad] = True
+            in_bad = np.zeros(n_points, dtype=bool)
+            in_bad[cells[bad]] = True
+            hold = moving & in_bad[ids[cand]]
+            inc[hold] *= 0.5
+            give_up = hold & (inc < min_inc * (1 - 1e-9))
+            inc[give_up] = 0.0
+            moving &= ~give_up
+            h = cand[hold]
+            points[ids[h]] = P0[h] + (alpha[h] + inc[hold])[:, None] * D[h]
+
+        alpha[cand] += inc
+        alpha[alpha > 1.0 - 1e-9] = 1.0
+        n_moves = smooth_interior_displacement(
+            points, ref_points, cells, free_ids, offsets, data, grads, floor, tol, smooth_sweeps
+        )
+        relax_ids = np.unique(cells[blocked])
+        relax_ids = relax_ids[is_free[relax_ids]]
+        n_relax = relax_nodes(
+            points, cells, relax_ids, offsets, data, grads, floor, 0.05 * h_node, relax_iters
+        )
+        print(
+            f"  -> Step {step + 1}: {int(moving.sum())} nodes advanced "
+            f"({int((moving & (inc < 1.0 / n_steps - 1e-12)).sum())} partially), "
+            f"{int((alpha == 1.0).sum())}/{len(ids)} fully snapped, "
+            f"{n_moves} smoothing / {n_relax} relaxation moves."
+        )
+        if not moving.any():
             break
 
-        # Find which specific nodes belong to the inverted elements
-        bad_point_ids = np.unique(raw_cells[bad_tet_idx])
-
-        # Map those global point IDs to their index in our boundary array
-        bad_bnd_idx = p2b[bad_point_ids]
-
-        # Filter out nodes that aren't actually on the boundary (-1)
-        bad_bnd_idx = bad_bnd_idx[bad_bnd_idx != -1]
-
-        # Nothing left to relax: the bad cells have no snapped nodes, or all are already linear
-        if len(bad_bnd_idx) == 0 or np.all(alpha[bad_bnd_idx] == 0.0):
-            print(f"  -> {len(bad_tet_idx)} bad elements cannot be fixed by relaxing boundary nodes.")
-            break
-
-        if i == max_iters:
-            print(f"  -> WARNING: {len(bad_tet_idx)} bad elements remain after {max_iters} relaxations.")
-            break
-
-        print(f"  -> Iteration {i+1}: Found {len(bad_tet_idx)} ({100 *len(bad_tet_idx) / len(all_boundary_ids):.3f}%) bad elements. Relaxing nodes with decay step {decay_step}...")
-
-        # Relax the alpha for those specific nodes (alpha only ever decreases from 1.0).
-        alpha[bad_bnd_idx] = np.maximum(alpha[bad_bnd_idx] - decay_step, 0.0)
+    quad_mesh.points = points
 
     print("\n  -> Final Alpha Distribution:")
-    unique_alphas, counts = np.unique(np.round(alpha, decimals=5), return_counts=True)
-    
-    # Sort them in descending order (from 1.0 down to 0.0)
-    sort_idx = np.argsort(unique_alphas)[::-1]
-    unique_alphas = unique_alphas[sort_idx]
-    counts = counts[sort_idx]
-    
-    total_nodes = len(all_boundary_ids)
-    for a_val, count in zip(unique_alphas, counts):
-        pct = (count / total_nodes) * 100
-        print(f"       Alpha = {a_val:.2f}: {count:7d} nodes ({pct:5.2f}%)")
+    bins = [0.0, 0.25, 0.5, 0.75, 1.0 - 1e-9, 1.0 + 1e-9]
+    counts, _ = np.histogram(alpha, bins=bins)
+    names = ["[0, 0.25)", "[0.25, 0.5)", "[0.5, 0.75)", "[0.75, 1)", "1 (snapped)"]
+    for name, count in zip(names[::-1], counts[::-1]):
+        print(f"       Alpha {name:>11s}: {count:7d} nodes ({100 * count / len(ids):5.2f}%)")
     print("-" * 50)
     return all_boundary_ids
+
 
 def straighten_inverted_cells(quad_mesh: pv.UnstructuredGrid, min_quality: float = 0.0,
                               max_rounds: int = 10):

@@ -246,8 +246,6 @@ def test_adaptive_snap_no_boundary_nodes_is_noop():
     target = pv.Sphere(radius=10.0, center=(100, 100, 100)).triangulate()
 
     pts_before = quad.points.copy()
-    adaptive_snap_boundaries(
-        quad, target, only_high_order=True, max_iters=2, min_quality=-1.0
-    )
-    # min_quality=-1 ensures we never relax; only_high_order keeps corners frozen.
+    adaptive_snap_boundaries(quad, target, only_high_order=True, n_steps=2)
+    # only_high_order keeps corners frozen.
     np.testing.assert_array_equal(quad.points[:4], pts_before[:4])

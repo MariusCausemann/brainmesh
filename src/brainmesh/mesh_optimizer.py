@@ -216,3 +216,127 @@ def run_mesh_optimization(mesh, boundary_ids, iters=10, step_factor=0.05, target
     print(f"  -> Optimizer finished. Total successful node nudges: {total_moved}")
     mesh.points = optimized_points
     return mesh
+
+def quality_shape_grads():
+    """Shape-function gradients at every ``QUALITY_POINTS`` sample, shape (n_points, 10, 3)."""
+    return np.array([eval_shape_gradients(*p) for p in QUALITY_POINTS])
+
+
+@nb.njit(parallel=True)
+def cell_qualities(cell_ids, cells, points, shape_grads):
+    """Min scaled Jacobian of the quadratic tets ``cell_ids``."""
+    q = np.empty(len(cell_ids))
+    for k in nb.prange(len(cell_ids)):
+        q[k] = calc_single_tet_quality(cells[cell_ids[k]], points, shape_grads)
+    return q
+
+
+@nb.njit
+def cells_of_nodes(node_ids, offsets, data, n_cells):
+    """Ids of all cells adjacent to at least one of ``node_ids``."""
+    mask = np.zeros(n_cells, dtype=np.bool_)
+    for pid in node_ids:
+        for i in range(offsets[pid], offsets[pid + 1]):
+            mask[data[i]] = True
+    return np.nonzero(mask)[0]
+
+
+@nb.njit
+def _star_min(pid, cells, points, offsets, data, shape_grads, floor):
+    """Min quality over the cells around ``pid``, or -inf if any cell is below its floor."""
+    q_min = 1e9
+    for i in range(offsets[pid], offsets[pid + 1]):
+        cid = data[i]
+        q = calc_single_tet_quality(cells[cid], points, shape_grads)
+        if q < floor[cid]:
+            return -np.inf
+        if q < q_min:
+            q_min = q
+    return q_min
+
+
+@nb.njit
+def smooth_interior_displacement(
+    points, ref_points, cells, free_ids, offsets, data, shape_grads, floor, tol, sweeps
+):
+    """Gauss-Seidel Laplacian smoothing of the displacement ``points - ref_points``.
+
+    Each free node is moved towards ``ref + mean displacement of its neighbours`` (the
+    other nodes of its adjacent cells), so boundary motion is carried into the interior
+    while the reference shape is kept. A move (full, half or quarter step) is accepted
+    only if no adjacent cell drops below its ``floor`` and the worst adjacent cell does
+    not get worse. Nodes whose target is within ``tol`` of their position are skipped.
+    Returns the number of accepted moves.
+    """
+    total_moves = 0
+    for sweep in range(sweeps):
+        moves = 0
+        for pid in free_ids:
+            ax, ay, az, n = 0.0, 0.0, 0.0, 0
+            for i in range(offsets[pid], offsets[pid + 1]):
+                cid = data[i]
+                for j in range(10):
+                    o = cells[cid, j]
+                    if o != pid:
+                        ax += points[o, 0] - ref_points[o, 0]
+                        ay += points[o, 1] - ref_points[o, 1]
+                        az += points[o, 2] - ref_points[o, 2]
+                        n += 1
+            if n == 0:
+                continue
+            dx = ref_points[pid, 0] + ax / n - points[pid, 0]
+            dy = ref_points[pid, 1] + ay / n - points[pid, 1]
+            dz = ref_points[pid, 2] + az / n - points[pid, 2]
+            if dx * dx + dy * dy + dz * dz < tol[pid] * tol[pid]:
+                continue
+
+            ox, oy, oz = points[pid, 0], points[pid, 1], points[pid, 2]
+            old_min = _star_min(pid, cells, points, offsets, data, shape_grads, floor)
+            accepted = False
+            t = 1.0
+            for _ in range(3):
+                points[pid, 0] = ox + t * dx
+                points[pid, 1] = oy + t * dy
+                points[pid, 2] = oz + t * dz
+                if _star_min(pid, cells, points, offsets, data, shape_grads, floor) >= old_min:
+                    accepted = True
+                    break
+                t *= 0.5
+            if accepted:
+                moves += 1
+            else:
+                points[pid, 0], points[pid, 1], points[pid, 2] = ox, oy, oz
+        total_moves += moves
+        if moves == 0:
+            break
+    return total_moves
+
+
+@nb.njit
+def relax_nodes(points, cells, node_ids, offsets, data, shape_grads, floor, step, iters):
+    """Pattern search that raises the worst quality around each of ``node_ids``.
+
+    Each node tries ``+-step[pid]`` along x, y and z and takes the best probe if it
+    raises the min quality of its adjacent cells without breaking a floor; otherwise its
+    ``step`` is halved. Returns the number of accepted moves.
+    """
+    moves = 0
+    for _ in range(iters):
+        for pid in node_ids:
+            best = _star_min(pid, cells, points, offsets, data, shape_grads, floor)
+            ox, oy, oz = points[pid, 0], points[pid, 1], points[pid, 2]
+            bx, by, bz = ox, oy, oz
+            for axis in range(3):
+                for sgn in (-1.0, 1.0):
+                    points[pid, 0], points[pid, 1], points[pid, 2] = ox, oy, oz
+                    points[pid, axis] += sgn * step[pid]
+                    q = _star_min(pid, cells, points, offsets, data, shape_grads, floor)
+                    if q > best + 1e-12:
+                        best = q
+                        bx, by, bz = points[pid, 0], points[pid, 1], points[pid, 2]
+            points[pid, 0], points[pid, 1], points[pid, 2] = bx, by, bz
+            if bx == ox and by == oy and bz == oz:
+                step[pid] *= 0.5
+            else:
+                moves += 1
+    return moves

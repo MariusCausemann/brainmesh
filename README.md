@@ -134,7 +134,12 @@ The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, b
 | `-i` / `--input` | *(required)* | Linear tetrahedral mesh (`.vtk`, `.vtu`, …) |
 | `-t` / `--target` | *(required)* | Target surface for snapping (`.vtk`, `.stl`, `.ply`, `.obj`, …) |
 | `-o` / `--output` | `snapped_output.vtk` | Output path |
-| `--min-quality-factor` | `0.8` | Minimum allowed quality as a fraction of the original mesh's minimum — nodes are relaxed if snapping would drop below this threshold |
+| `--floor-factor` | `0.5` | Each cell may drop to this fraction of its original quality |
+| `--abs-floor` | `0.1` | …but not below this quality; cells that start lower may not degrade at all |
+| `--steps` | `10` | Number of incremental snapping steps |
+| `--label-array` | `marker` | Cell data array with region markers |
+
+Boundary nodes are moved onto the target in `--steps` increments. Each node is projected only onto the target sheets (`boundary_labels` pairs) matching the region pair of its facets; nodes without a matching sheet stay put. A node whose step would push an adjacent cell below its floor first tries a halved step (up to three times) and otherwise waits for the next step. After every step the interior displacement is smoothed so that interior nodes follow the boundary, and the free nodes of the cells that blocked a move are relaxed by a small pattern search to make room.
 
 ### Tuning the segmentation pipeline
 
