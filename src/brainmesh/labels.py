@@ -41,6 +41,7 @@ class BrainLabels(NamedTuple):
     TENTORIUM: np.uint8 = np.uint8(71)
     UNCLASSIFIED: np.uint8 = np.uint8(72)
     SPINAL_BUFFER: np.uint8 = np.uint8(73)
+    VESSEL: np.uint8 = np.uint8(74)
     WM_HYPOINTENSITIES: np.uint8 = np.uint8(77)
 
 # Instantiate the named tuple
@@ -86,8 +87,9 @@ def is_csf_marker(markers):
     """True where a marker belongs to the CSF compartment.
 
     That is CSF itself, any ventricle or choroid plexus, or a SAS parcel
-    (``> SAS_LABEL_OFFSET``).  ``UNCLASSIFIED`` (vessels in the SAS) and
-    ``SPINAL_BUFFER`` are deliberately *not* part of it.
+    (``> SAS_LABEL_OFFSET``).  ``UNCLASSIFIED`` (vessels in the SAS),
+    ``SPINAL_BUFFER`` and ``VESSEL`` (reconstructed vessel lumens) are
+    deliberately *not* part of it.
     """
     markers = np.asarray(markers)
     return np.isin(markers, CSF_LABELS) | (markers > SAS_LABEL_OFFSET)
@@ -103,7 +105,8 @@ WM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_WHITE_MATTER,
 GM_CEREBELLUM_LABELS = [Label.LEFT_CEREBELLUM_CORTEX, 
                         Label.RIGHT_CEREBELLUM_CORTEX]
 
-TISSUE_LABELS = list(set(Label._asdict().values()) - set(VENTRICLE_LABELS + [Label.CSF]))
+TISSUE_LABELS = list(set(Label._asdict().values())
+                     - set(VENTRICLE_LABELS + [Label.CSF, Label.VESSEL]))
 
 # groups for csf facet regions
 # ── DK40 aparc parcel → lobe groupings (FreeSurfer label values, pre-SAS-offset) ──

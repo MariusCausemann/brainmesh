@@ -12,7 +12,8 @@ from .config import SegmentationConfig
 
 def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
                             config: SegmentationConfig | None = None,
-                            numba_threads=8):
+                            numba_threads=8,
+                            vessel_centerlines=None, vessel_mask=None):
     """
     Run the full segmentation-cleanup and surface-extraction pipeline.
 
@@ -27,6 +28,11 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     out_surf : str or Path, optional  destination file for the extracted surface
     config   : SegmentationConfig, optional  per-step parameter overrides
     numba_threads : int               thread count passed to numba
+    vessel_centerlines : str or Path, optional  ``.vtp`` vessel centerlines with
+                         point-data ``radius`` (mm), in the world frame of the seg
+    vessel_mask : str or Path, optional  vessel mask (``.nii``, any grid); together
+                  with ``vessel_centerlines`` the lumens are united. Either one
+                  enables the perivascular CSF sleeve (see ``[vessels]``).
     """
     import numba
     numba.set_num_threads(numba_threads)
@@ -51,11 +57,15 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         fill_small_unclassified_fragments,
         VENTRICLE_LABELS
     )
+    from brainmesh.vessels import enforce_vessel_sleeve, vessel_distance
 
     cfg = config or SegmentationConfig()
     seg = get_img(seg_path)
     data = np.ascontiguousarray(seg.get_fdata().astype(np.uint8))
     assert np.shares_memory(data, seg.get_fdata()) == False
+    voxel_size = np.asarray(seg.header.get_zooms()[:3])
+    vessel_dist = vessel_distance(seg, centerlines=vessel_centerlines,
+                                  mask=vessel_mask, cfg=cfg.vessels)
     print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
     data = solidify_csf(data, **asdict(cfg.solidify_csf))
     print(f"{(data==Label.CSF).sum() * 0.5**3 *1e-3} ml CSF ")
@@ -107,6 +117,19 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     assert data.dtype == np.uint8
     data = enforce_csf_around_tentorium(data, **asdict(cfg.csf_around_tentorium))
     data = enforce_csf_around_falx(data, **asdict(cfg.csf_around_falx))
+    if vessel_dist is not None:
+        # after the mode filters, which would erode the thin sleeves
+        data = enforce_vessel_sleeve(data, vessel_dist,
+                                     sleeve_thickness=cfg.vessels.sleeve_thickness,
+                                     subdomain=cfg.vessels.subdomain,
+                                     min_csf_voxels=cfg.vessels.min_csf_voxels,
+                                     min_lumen_voxels=cfg.vessels.min_lumen_voxels,
+                                     ventricle_clearance=cfg.vessels.ventricle_clearance,
+                                     voxel_size=voxel_size)
+        sleeve = (vessel_dist > 0) & (vessel_dist <= cfg.vessels.sleeve_thickness)
+        voxel_ml = np.prod(voxel_size) * 1e-3
+        print(f"{(vessel_dist <= 0).sum() * voxel_ml:.2f} ml vessel lumen, "
+              f"{sleeve.sum() * voxel_ml:.2f} ml sleeve (before masking)")
     data = enforce_csf_layer(data, **asdict(cfg.enforce_csf_layer_post))
     data = extend_brainstem_caudally(data, **asdict(cfg.extend_brainstem_caudally))
 

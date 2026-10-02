@@ -4,7 +4,7 @@ import numba as nb
 from tqdm import tqdm
 
 # We import your exact shape gradient function to precompute the matrices
-from .curved_mesh import eval_shape_gradients  # Adjust import based on your structure
+from .curved_mesh import QUALITY_POINTS, eval_shape_gradients  # Adjust import based on your structure
 
 @nb.njit
 def build_node_to_cell_map(n_points, cells):
@@ -59,7 +59,7 @@ def calc_single_tet_quality(cell_nodes, points, shape_grads):
     Highly unrolled for maximum Numba performance.
     """
     min_q = 1e9
-    for p in range(5): # Loop over 5 integration points
+    for p in range(shape_grads.shape[0]): # Loop over the quality sample points
         # Calculate J = sum(points * grad)
         J00, J01, J02 = 0.0, 0.0, 0.0
         J10, J11, J12 = 0.0, 0.0, 0.0
@@ -194,11 +194,8 @@ def run_mesh_optimization(mesh, boundary_ids, iters=10, step_factor=0.05, target
     """
     print(f"Starting local Numba optimization for {iters} iterations...")
     
-    integration_points = [
-        (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), 
-        (0.0, 0.0, 1.0), (0.25, 0.25, 0.25)
-    ]
-    shape_grads = np.zeros((5, 10, 3))
+    integration_points = QUALITY_POINTS
+    shape_grads = np.zeros((len(integration_points), 10, 3))
     for i, (xi, eta, zeta) in enumerate(integration_points):
         shape_grads[i] = eval_shape_gradients(xi, eta, zeta)
         

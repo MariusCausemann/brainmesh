@@ -249,10 +249,12 @@ def enforce_csf_layer(data, thickness=1):
         & (data != Label.FALX)
         & (data != Label.BRAIN_STEM)
         & (data != Label.UNCLASSIFIED)
+        & (data != Label.VESSEL)
     )
     dilated_mask = dilate(mask, radius=thickness, struct_sequence="B")
     mask += data == Label.BRAIN_STEM
     mask += data == Label.UNCLASSIFIED
+    mask += data == Label.VESSEL
     mask += data == Label.TENTORIUM
     mask += data == Label.FALX
     return set_mask_scalar(data, dilated_mask > mask, Label.CSF)
@@ -277,6 +279,7 @@ def count_background_contacts(data):
         & (data != Label.BRAIN_STEM)
         & (data != Label.UNCLASSIFIED)
         & (data != Label.SPINAL_BUFFER)
+        & (data != Label.VESSEL)
     )
     return (dilate(par, radius=1, struct_sequence="B") & (data == 0)).sum()
 

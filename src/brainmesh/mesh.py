@@ -287,9 +287,9 @@ def extract_csf(mesh, label_array="marker", return_facets=False, **facet_kwargs)
     and any SAS-subdivision markers (values > ``SAS_LABEL_OFFSET``); see
     :func:`brainmesh.labels.is_csf_marker`.
 
-    ``Label.UNCLASSIFIED`` (vessels sitting in the SAS) and ``Label.SPINAL_BUFFER``
-    are *not* part of it: they stay solid, and their facets against the CSF become
-    boundaries of the extracted submesh (the buffer ones as ``SPINAL_ID``).
+    ``Label.UNCLASSIFIED`` (vessels sitting in the SAS), ``Label.VESSEL`` and
+    ``Label.SPINAL_BUFFER`` are *not* part of it: they stay solid, and their facets
+    against the CSF become boundaries of the extracted submesh (the buffer ones as ``SPINAL_ID``).
 
     When ``return_facets=True``, facets are computed on the **full** mesh so that
     CSF-to-tissue interfaces carry their full ``interface_id`` encoding
@@ -413,7 +413,8 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     region_label_dict = {"SPINAL_CSF": 1, "PIA": 3, "LATERAL_VENTRICLES":2,
                          "FALX":4, "TENTORIUM_UPPER":5, "TENTORIUM_LOWER":6,
                          "UNCLASSIFIED":7,
-                         "ANTERIOR_PARASAGITTAL_SINUS":8,"POSTERIOR_PARASAGITTAL_SINUS":9}
+                         "ANTERIOR_PARASAGITTAL_SINUS":8,"POSTERIOR_PARASAGITTAL_SINUS":9,
+                         "VESSEL_WALL":30}
 
     ids = np.asarray(facets.cell_data["interface_id"], dtype=np.int64)
     a, b = np.divmod(ids, encoding_base)
@@ -450,6 +451,9 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     _assign((a == Label.UNCLASSIFIED) | (b == Label.UNCLASSIFIED),
             region_label_dict["UNCLASSIFIED"])
 
+    # walls of reconstructed vessel lumens (Label.VESSEL)
+    _assign((a == Label.VESSEL) | (b == Label.VESSEL), region_label_dict["VESSEL_WALL"])
+
     # all remaining internal -> tissue
     _assign(ids >= encoding_base, region_label_dict["PIA"])
 
@@ -475,7 +479,8 @@ def group_csf_facets_by_region(facets, encoding_base=100000):
     region[np.logical_and(PSD, np.isin(ids, _sas_rh(anterior_PSD) + _sas_lh(anterior_PSD)))] = region_label_dict["ANTERIOR_PARASAGITTAL_SINUS"]
     region[np.logical_and(PSD, np.isin(ids, _sas_rh(posterior_PSD) + _sas_lh(posterior_PSD)))] = region_label_dict["POSTERIOR_PARASAGITTAL_SINUS"]
     
-    sas_regions = np.unique(region[region >= 10]).tolist()
+    sas_ids = [region_label_dict[k] for k in sas_region_dict]
+    sas_regions = np.unique(region[np.isin(region, sas_ids)]).tolist()
     out = facets.copy()
     region = remove_small_patches(out, region, threshold=50, target_labels=sas_regions)
     region = dilate_cell_marker(out, region, 10)

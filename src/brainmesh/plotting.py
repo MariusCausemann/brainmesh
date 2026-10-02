@@ -65,6 +65,7 @@ FREESURFER_COLORS = {
     71:  (240/255, 230/255, 140/255),  # TENTORIUM (khaki)
     72:  (255/255, 255/255, 255/255),  # UNCLASSIFIED (black)
     73:  (255/255, 255/255, 255/255),  # SPINAL_BUFFER (black)
+    74:  (200/255,  30/255,  45/255),  # VESSEL (crimson)
 
 }
 

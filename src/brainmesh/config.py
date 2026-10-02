@@ -116,6 +116,20 @@ class CoarsenSurfaceCfg:
 
 
 @dataclass
+class VesselCfg:
+    sleeve_thickness: float = 0.5
+    subdomain: bool = False
+    min_csf_voxels: int = 1
+    min_lumen_voxels: int = 27
+    ventricle_clearance: int = 3
+    radius_scale: float = 1.0
+    radius_floor: float = 0.0
+    min_radius: float = 0.0
+    segments: list = field(default_factory=list)
+    mask_labels: list = field(default_factory=list)
+
+
+@dataclass
 class PipelineMiscCfg:
     original_mask_smoothing_radius: int = 1
     apply_mode_box_pre: bool = True
@@ -141,6 +155,7 @@ class SegmentationConfig:
     csf_around_falx: EnforceCSFAroundCfg = field(default_factory=EnforceCSFAroundCfg)
     extend_brainstem_caudally: ExtendBrainstemCaudallyCfg = field(default_factory=ExtendBrainstemCaudallyCfg)
     coarsen_surface: CoarsenSurfaceCfg = field(default_factory=CoarsenSurfaceCfg)
+    vessels: VesselCfg = field(default_factory=VesselCfg)
     misc: PipelineMiscCfg = field(default_factory=PipelineMiscCfg)
 
     @classmethod

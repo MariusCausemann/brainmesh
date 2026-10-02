@@ -7,6 +7,7 @@ Create tetrahedral brain meshes from FreeSurfer/SynthSeg segmentations for FEM s
 Starting from a labelled NIfTI segmentation (e.g. SynthSeg at 0.5 mm), `brainmesh`:
 
 1. **Cleans the segmentation** — fills CSF holes, adds falx and tentorium, repairs ventricular connectivity, fixes the brainstem/spine interface.  Two non-anatomical labels come out of this step: `UNCLASSIFIED` (72), mostly vessels sitting in the SAS, and `SPINAL_BUFFER` (73), a flat slab extruded below the bottom of the image so the spinal opening is a plain label interface rather than something that has to be found geometrically.
+   Optionally, reconstructed **vessels** carve an open perivascular CSF sleeve into the segmentation (see [Vessels](#vessels)), with the lumen either CSF or its own `VESSEL` (74) label.
 2. **Extracts a multi-boundary surface mesh** using PyVista's `contour_labels`.
 3. **Tetrahedralises** the surface with fTetWild (`pytetwild`).
 4. **Marks** each tetrahedron with its anatomical label via the winding-number method.
@@ -22,6 +23,21 @@ pip install -e ".[dev]"
 ```
 
 ## Usage
+
+### Vessels
+
+`brainmesh-surface` takes vessel reconstructions in the world frame of the segmentation:
+
+```bash
+brainmesh-surface seg.nii.gz --config my_subject.toml \
+    --vessel-centerlines centerlines.vtp \
+    --vessel-mask vessels.nii.gz
+```
+
+- `--vessel-centerlines`: polylines (`.vtp`) with a point-data `radius` in mm. The lumen is the exact union of the tapered capsules around every segment, evaluated at the voxel centres, so radii and sleeve thickness are not rounded to voxels. The cell-data `segment` labels (with field data `segment_names`) allow selecting branches.
+- `--vessel-mask`: a binary or labelled mask on any grid; it is resampled onto the segmentation and turned into a signed distance transform.
+
+Either or both may be given (the lumens are united). The `[vessels]` config table (in mm) sets the sleeve thickness, whether the lumen becomes CSF or its own `VESSEL` label (`subdomain`), and radius scaling/filtering. The sleeve is written after the final mode filters, into CSF and tissue alike (an open PVS through the parenchyma), but never grows the domain and never overwrites the falx, the tentorium or the ventricles. It also stays `ventricle_clearance` voxels (default 3) away from the ventricles and choroid plexus, so it cannot cut through the tissue jacket that `tight_ventricles` puts around them and open a ventricle to the SAS. Sleeves thinner than a voxel diagonal trigger a warning; with `subdomain = true` a one-voxel CSF jacket around the lumen is always enforced.
 
 ### Command line
 
@@ -94,7 +110,7 @@ The output carries a single `interface_id` cell array using the following scheme
 
 | Range | Meaning |
 |---|---|
-| `2–77` | FreeSurfer aseg anatomy (unchanged), plus `70` falx, `71` tentorium, `72` unclassified (vessels in the SAS), `73` spinal buffer |
+| `2–77` | FreeSurfer aseg anatomy (unchanged), plus `70` falx, `71` tentorium, `72` unclassified (vessels in the SAS), `73` spinal buffer, `74` vessel lumen (`[vessels] subdomain = true`) |
 | `11001–11035` | LH SAS parcels — decode: `fs_aparc = marker - 10000` |
 | `12001–12035` | RH SAS parcels — decode: `fs_aparc = marker - 10000` |
 
@@ -107,9 +123,9 @@ The output carries a single `interface_id` cell array using the following scheme
 | `--facets` | `csf_facets.vtk` | Output path for the CSF facet mesh |
 | `--label-array` | `marker` | Cell data array used for region markers |
 
-The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, but is restricted to facets bounding the CSF compartment — including CSF-to-tissue interfaces with their full encoding (e.g. `min(CSF,WM)*100000+max(CSF,WM)`).  The CSF compartment is CSF, the ventricles and choroid plexus, and the SAS parcels; `UNCLASSIFIED` and `SPINAL_BUFFER` stay solid, so their facets against the CSF become boundaries of the submesh.
+The facet mesh uses the same `interface_id` scheme as `brainmesh-mark-facets`, but is restricted to facets bounding the CSF compartment — including CSF-to-tissue interfaces with their full encoding (e.g. `min(CSF,WM)*100000+max(CSF,WM)`).  The CSF compartment is CSF, the ventricles and choroid plexus, and the SAS parcels; `UNCLASSIFIED`, `VESSEL` and `SPINAL_BUFFER` stay solid, so their facets against the CSF become boundaries of the submesh.
 
-`brainmesh-group-regions` sorts those facets into named regions (written next to the output as `<name>_labels.toml`).  Notable ids: `1` spinal opening, `2` lateral ventricles, `3` pia, `4` falx, `5`/`6` tentorium, `7` unclassified (vessel walls in the SAS), `8`/`9` parasagittal sinus, `10+` SAS lobes.
+`brainmesh-group-regions` sorts those facets into named regions (written next to the output as `<name>_labels.toml`).  Notable ids: `1` spinal opening, `2` lateral ventricles, `3` pia, `4` falx, `5`/`6` tentorium, `7` unclassified (vessel walls in the SAS), `8`/`9` parasagittal sinus, `10+` SAS lobes, `30` vessel walls (`VESSEL` lumens).
 
 `brainmesh-curve-mesh` accepts the following options:
 

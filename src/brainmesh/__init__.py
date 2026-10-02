@@ -49,6 +49,8 @@ from .mesh import (
 from .mesh_optimizer import run_mesh_optimization
 from .phantom import make_phantom_seg
 from .config import SegmentationConfig
+from .vessels import (read_centerlines, centerline_distance, mask_distance,
+                      vessel_distance, enforce_vessel_sleeve)
 
 __all__ = [
     "Label",
@@ -96,4 +98,9 @@ __all__ = [
     "mark_facets",
     "make_phantom_seg",
     "SegmentationConfig",
+    "read_centerlines",
+    "centerline_distance",
+    "mask_distance",
+    "vessel_distance",
+    "enforce_vessel_sleeve",
 ]

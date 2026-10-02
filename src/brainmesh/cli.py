@@ -27,6 +27,14 @@ def surface_main(argv=None):
     parser.add_argument("--decimation-ratio", type=float, default=None,
                         help="Override coarsen_surface.decimation_ratio.")
 
+    parser.add_argument("--vessel-centerlines", default=None,
+                        help="Vessel centerlines (.vtp polylines with point-data 'radius' in mm, "
+                             "world frame of the seg). Enforces a perivascular CSF sleeve; "
+                             "parameters in the [vessels] config table.")
+    parser.add_argument("--vessel-mask", default=None,
+                        help="Vessel mask (.nii, any grid). May be combined with "
+                             "--vessel-centerlines (union of lumens).")
+
     parser.add_argument("--threads", type=int, default=1,
                         help="Number of numba threads (default: 1)")
     args = parser.parse_args(argv)
@@ -52,6 +60,8 @@ def surface_main(argv=None):
         out_surf=args.out_surf,
         config=cfg,
         numba_threads=args.threads,
+        vessel_centerlines=args.vessel_centerlines,
+        vessel_mask=args.vessel_mask,
     )
 
 def mesh_main(argv=None):
@@ -106,6 +116,7 @@ def curve_mesh_main(argv=None):
         adaptive_snap_boundaries,
         convert_to_quadratic,
         print_quality_stats,
+        straighten_inverted_cells,
     )
     from .mesh_optimizer import run_mesh_optimization
     from brainmesh.io import read_mesh, save_mesh
@@ -132,7 +143,17 @@ def curve_mesh_main(argv=None):
     quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=all_boundary_ids, iters=20,
                                       target_quality=0.2, step_factor=0.1)
 
-    print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
+    final_q = print_quality_stats(quad_mesh, "4. Final Optimized Quadratic Mesh")
+
+    if final_q.min() <= 0:
+        print("Inverted cells remain; straightening their mid-edge nodes...")
+        straighten_inverted_cells(quad_mesh)
+        final_q = print_quality_stats(quad_mesh, "5. Repaired Quadratic Mesh")
+    if final_q.min() <= 0:
+        raise SystemExit(
+            f"ERROR: curved mesh still has {int((final_q <= 0).sum())} inverted cells "
+            f"(min scaled Jacobian {final_q.min():.4f}); not writing {args.output}."
+        )
 
     #quad_mesh = run_mesh_optimization(quad_mesh, boundary_ids=[], iters=2,
     #                                  target_quality=0.08, step_factor=0.1)

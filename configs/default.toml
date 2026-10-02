@@ -183,6 +183,39 @@ footprint_closing_radius = 4
 # Radius of the surrounding CSF buffer extruded together with the brainstem.
 csf_buffer_radius        = 4
 
+# --- Vessels (only active with --vessel-centerlines and/or --vessel-mask) ---
+
+[vessels]
+# Lumen from centerlines (.vtp, point-data 'radius' in mm) and/or a vessel
+# mask (.nii, any grid); several sources are united. Units here are mm, not
+# voxels. The sleeve 0 < dist <= sleeve_thickness around the lumen becomes
+# CSF, in the SAS and through tissue (open PVS); the domain never grows and
+# falx, tentorium and ventricles (and a jacket around them) are never overwritten.
+sleeve_thickness = 0.5
+# true: the lumen becomes its own label (VESSEL = 74, a tet subdomain);
+# false: the lumen is CSF too.
+subdomain        = false
+# CSF jacket (voxels) enforced around a VESSEL lumen (subdomain only).
+min_csf_voxels   = 1
+# Lumen fragments smaller than this (voxels, 26-connected) become CSF rather
+# than tiny subdomains, e.g. where a vessel is cut by the falx or tentorium.
+min_lumen_voxels = 27
+# Keep-out distance (voxels) around the ventricles and choroid plexus. Keep it
+# >= tight_ventricles.surrounding_layer_thickness, or the sleeves cut through
+# the ventricle tissue jacket and open ventricle-SAS shortcuts.
+ventricle_clearance = 2
+# Centerline radii are scaled by radius_scale, then clamped to >= radius_floor
+# (mm; > 0 keeps thin vessels resolved). Segments with mean radius below
+# min_radius (mm) are dropped.
+radius_scale     = 1.0
+radius_floor     = 0.0
+min_radius       = 0.0
+# Keep only these centerline 'segment' labels (ids or names such as "MCA-L");
+# empty keeps all.
+segments         = []
+# Mask labels counted as lumen; empty means all > 0.
+mask_labels      = []
+
 # --- Surface output ----------------------------------------------------------
 
 [coarsen_surface]
