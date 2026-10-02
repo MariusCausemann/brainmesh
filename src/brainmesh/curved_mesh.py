@@ -1,7 +1,6 @@
 import pyvista as pv
 import numpy as np
 import vtk
-from tqdm import tqdm
 
 from .mesh import mark_interface_facets
 
@@ -42,6 +41,20 @@ def eval_shape_gradients(xi, eta, zeta):
     
     return np.column_stack([dN_dxi, dN_deta, dN_dzeta])
 
+# Reference points where the Jacobian is sampled: 4 vertices, 6 edge midpoints and the
+# centre. detJ of a P2 tet is cubic, and its minimum often sits at an edge midpoint, so
+# sampling only the vertices and the centre misses folds.
+QUALITY_POINTS = [
+    (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
+    (0.5, 0.0, 0.0), (0.5, 0.5, 0.0), (0.0, 0.5, 0.0),
+    (0.0, 0.0, 0.5), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5),
+    (0.25, 0.25, 0.25),
+]
+
+# VTK quadratic tet: mid-edge node -> its two corner nodes
+MIDSIDE_EDGES = [(4, 0, 1), (5, 1, 2), (6, 0, 2), (7, 0, 3), (8, 1, 3), (9, 2, 3)]
+
+
 def compute_quadratic_quality(mesh):
     """
     Computes the minimum exact Jacobian determinant for every 2nd-order 
@@ -58,19 +71,12 @@ def compute_quadratic_quality(mesh):
     tet_nodes = mesh.cells_dict[24]
     tet_points = mesh.points[tet_nodes]
     
-    # Evaluate at the 4 vertices and the element center
-    integration_points = [
-        (0.0, 0.0, 0.0),   # Node 0
-        (1.0, 0.0, 0.0),   # Node 1
-        (0.0, 1.0, 0.0),   # Node 2
-        (0.0, 0.0, 1.0),   # Node 3
-        (0.25, 0.25, 0.25) # Center
-    ]
+    integration_points = QUALITY_POINTS
     
     N_cells = len(tet_nodes)
     min_jacobians = np.full(N_cells, np.inf)
             
-    for (xi, eta, zeta) in tqdm(integration_points):
+    for (xi, eta, zeta) in integration_points:
         # Get shape function gradients: Shape (10, 3)
         dNdX = eval_shape_gradients(xi, eta, zeta)
         J = np.einsum('nik,ij->nkj', tet_points, dNdX)
@@ -167,38 +173,42 @@ def adaptive_snap_boundaries(
     # Extract raw cell definitions
     raw_cells = quad_mesh.cells.reshape(-1, 11)[:, 1:]
     
-    for i in range(max_iters):
+    # max_iters relaxations plus a final check, so the state after the last relaxation is
+    # evaluated too (the loop used to stop right after relaxing, unchecked).
+    for i in range(max_iters + 1):
         # Update the mesh points using the current alpha weights
         quad_mesh.points[all_boundary_ids] = P_orig + alpha[:, np.newaxis] * (P_target - P_orig)
-        
+
         # Compute the quality
         qualities = compute_quadratic_quality(quad_mesh)
         bad_tet_idx = np.where(qualities < min_quality)[0]
-        
+
         if len(bad_tet_idx) == 0:
             print(f"  -> Adaptive snapping converged successfully at iteration {i+1}!")
             break
-            
-        print(f"  -> Iteration {i+1}: Found {len(bad_tet_idx)} ({100 *len(bad_tet_idx) / len(all_boundary_ids):.3f}%) bad elements. Relaxing nodes with decay step {decay_step}...")
-        
+
         # Find which specific nodes belong to the inverted elements
         bad_point_ids = np.unique(raw_cells[bad_tet_idx])
-        
+
         # Map those global point IDs to their index in our boundary array
         bad_bnd_idx = p2b[bad_point_ids]
-        
+
         # Filter out nodes that aren't actually on the boundary (-1)
         bad_bnd_idx = bad_bnd_idx[bad_bnd_idx != -1]
-        
+
+        # Nothing left to relax: the bad cells have no snapped nodes, or all are already linear
+        if len(bad_bnd_idx) == 0 or np.all(alpha[bad_bnd_idx] == 0.0):
+            print(f"  -> {len(bad_tet_idx)} bad elements cannot be fixed by relaxing boundary nodes.")
+            break
+
+        if i == max_iters:
+            print(f"  -> WARNING: {len(bad_tet_idx)} bad elements remain after {max_iters} relaxations.")
+            break
+
+        print(f"  -> Iteration {i+1}: Found {len(bad_tet_idx)} ({100 *len(bad_tet_idx) / len(all_boundary_ids):.3f}%) bad elements. Relaxing nodes with decay step {decay_step}...")
+
         # Relax the alpha for those specific nodes (alpha only ever decreases from 1.0).
         alpha[bad_bnd_idx] = np.maximum(alpha[bad_bnd_idx] - decay_step, 0.0)
-        
-        # Safety break if all bad boundary nodes have completely reverted to 0.0
-        if np.all(alpha[bad_bnd_idx] == 0.0):
-            print(f"  -> Reached maximum relaxation (linear state) for problematic nodes at iteration {i+1}.")
-            # Apply final 0.0 state before breaking
-            quad_mesh.points[all_boundary_ids] = P_orig + alpha[:, np.newaxis] * (P_target - P_orig)
-            break
 
     print("\n  -> Final Alpha Distribution:")
     unique_alphas, counts = np.unique(np.round(alpha, decimals=5), return_counts=True)
@@ -214,6 +224,33 @@ def adaptive_snap_boundaries(
         print(f"       Alpha = {a_val:.2f}: {count:7d} nodes ({pct:5.2f}%)")
     print("-" * 50)
     return all_boundary_ids
+
+def straighten_inverted_cells(quad_mesh: pv.UnstructuredGrid, min_quality: float = 0.0,
+                              max_rounds: int = 10):
+    """Last-resort repair: reset the mid-edge nodes of every cell below `min_quality`
+    to the midpoints of its corner edges (a straight-sided, constant-detJ cell).
+
+    Mid-edge nodes are shared between cells, so a reset can degrade a neighbour; this
+    repeats until no cell is below `min_quality` or `max_rounds` is reached. Returns
+    the number of cells still below `min_quality`.
+    """
+    cells = quad_mesh.cells.reshape(-1, 11)[:, 1:]
+    points = quad_mesh.points.copy()
+    n_bad = 0
+    for _ in range(max_rounds):
+        q = compute_quadratic_quality(quad_mesh)
+        bad = np.where(q < min_quality)[0]
+        n_bad = len(bad)
+        if n_bad == 0:
+            break
+        for m, a, b in MIDSIDE_EDGES:
+            points[cells[bad, m]] = 0.5 * (points[cells[bad, a]] + points[cells[bad, b]])
+        quad_mesh.points = points
+        print(f"  -> Straightened mid-edge nodes of {n_bad} cells below quality {min_quality}.")
+    else:
+        n_bad = int((compute_quadratic_quality(quad_mesh) < min_quality).sum())
+    return n_bad
+
 
 def print_quality_stats(mesh: pv.UnstructuredGrid, mesh_name: str):
     """Computes and prints the Scaled Jacobian quality of the mesh."""
