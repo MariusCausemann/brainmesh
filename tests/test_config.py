@@ -71,7 +71,8 @@ class TestDefaults:
 
     def test_coarsen_surface_defaults(self):
         cfg = SegmentationConfig()
-        assert cfg.coarsen_surface.decimation_ratio == 0.9
+        assert cfg.coarsen_surface.epsilon == 0.5
+        assert cfg.surface.smoothing_scale == 1.0
 
 
 class TestFromDict:

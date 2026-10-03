@@ -37,10 +37,13 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
     import numba
     numba.set_num_threads(numba_threads)
 
+    from imagemesh.image import get_img, nibabel_to_pyvista
+    from imagemesh.io import save_mesh
+    from imagemesh.simplification import simplify_surface
+    from imagemesh.surface import extract_surface
+
     from brainmesh import (
         Label,
-        nibabel_to_pyvista,
-        save_mesh,
         solidify_csf, close_csf_space,
         fill_wm_hyperintensities, cut_bottom, extend_brainstem,
         enforce_csf_layer,
@@ -48,12 +51,10 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         create_falx, create_tentorium,
         enforce_csf_around_tentorium, enforce_csf_around_falx,
         extend_brainstem_caudally,
-        get_img,
         build_inferior_lateral_ventricle_horns,
         enforce_connected_ventricles,
         enforce_min_thickness,
         enforce_tight_ventricles,
-        coarsen_surface,
         fill_small_unclassified_fragments,
         VENTRICLE_LABELS
     )
@@ -161,38 +162,40 @@ def segmentation_to_surface(seg_path, out_seg=None, out_surf=None, *,
         save_mesh(grid, out_vti_path)
 
     # Extract surface
-    surf = grid.contour_labels("all", smoothing=True)
+    surf = extract_surface(grid, **asdict(cfg.surface))
 
     # Only save surface outputs if requested
     if out_surf is not None:
         out_surf_path = pathlib.Path(out_surf)
         grid["data"] = seg.get_fdata().astype(np.uint8).flatten(order="F")
-        origsurf = grid.contour_labels("all", smoothing=True)
+        origsurf = extract_surface(grid, **asdict(cfg.surface))
         out_surf_orig_path = out_surf_path.parent / f"{out_surf_path.stem}_orig{out_surf_path.suffix}"
         save_mesh(origsurf, out_surf_orig_path)
 
         save_mesh(surf, out_surf_path)
 
-        # Save the decimated surface, appending '_dec' to the provided surface filename
-        surf_dec = coarsen_surface(surf, **asdict(cfg.coarsen_surface))
+        # Save the simplified surface, appending '_dec' to the provided surface filename
+        dx = float(np.min(grid.spacing))
+        surf_dec = simplify_surface(surf, epsilon=cfg.coarsen_surface.epsilon * dx)
         out_surf_dec_path = out_surf_path.parent / f"{out_surf_path.stem}_dec{out_surf_path.suffix}"
         save_mesh(surf_dec, out_surf_dec_path)
     
     return surf
 
-def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
+def surface_to_mesh(surf_path, out_file=None, simplify_eps=None, **tetwild_kwargs):
     """
     Tetrahedralise a surface and mark each cell with its anatomical label.
 
     Parameters
     ----------
     surf_path    : str or Path  path to a .vtk surface with boundary_labels
-    out_dir      : str or Path  destination folder
+    out_file     : str or Path  destination file
+    simplify_eps : float, optional  simplify the surface first, with this
+                   absolute distance tolerance (mm)
     **tetwild_kwargs : forwarded to pytetwild.tetrahedralize_pv
     """
-    import pytetwild
-
-    from brainmesh import mark_mesh, read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
+    from imagemesh.tetmesh import mesh_surface
 
     surf = read_mesh(surf_path)
 
@@ -208,16 +211,17 @@ def surface_to_mesh(surf_path, out_file=None, **tetwild_kwargs):
     )
     twild_defaults.update(tetwild_kwargs)
 
-    mesh = pytetwild.tetrahedralize_pv(surf, **twild_defaults)
-    mesh = mark_mesh(mesh, surf)
+    mesh, _ = mesh_surface(surf, simplify_eps=simplify_eps, label_name="marker",
+                           **twild_defaults)
     save_mesh(mesh, out_file)
     return mesh
 
 
 def subdivide_SAS(seg_img, parc_img, numba_threads):
-    from brainmesh import (Label, get_img, grow_into_region,
-                            reverse_label_map,
-                            VENTRICLE_LABELS)
+    from imagemesh.image import get_img
+    from imagemesh.morphology import grow_into_region
+
+    from brainmesh import Label, reverse_label_map, VENTRICLE_LABELS
     import numba
     numba.set_num_threads(numba_threads)
     # get images

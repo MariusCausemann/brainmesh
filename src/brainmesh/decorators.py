@@ -1,28 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import time
 import fastremap
 from functools import wraps
-from contextlib import contextmanager
 from datetime import datetime
 
+from imagemesh.timing import time_func, timer  # noqa: F401
+
 from .labels import Label
-
-
-@contextmanager
-def timer(name):
-    start = time.perf_counter()
-    yield
-    end = time.perf_counter()
-    print(f"[{name}] finished in {end - start:.4f} seconds")
-
-
-def time_func(func):
-    def wrapper(*args, **kwargs):
-        with timer(func.__name__):
-            return func(*args, **kwargs)
-    return wrapper
 
 
 def track_voxel_changes(func):

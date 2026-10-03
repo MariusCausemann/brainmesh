@@ -8,7 +8,7 @@ Starting from a labelled NIfTI segmentation (e.g. SynthSeg at 0.5 mm), `brainmes
 
 1. **Cleans the segmentation** — fills CSF holes, adds falx and tentorium, repairs ventricular connectivity, fixes the brainstem/spine interface.  Two non-anatomical labels come out of this step: `UNCLASSIFIED` (72), mostly vessels sitting in the SAS, and `SPINAL_BUFFER` (73), a flat slab extruded below the bottom of the image so the spinal opening is a plain label interface rather than something that has to be found geometrically.
    Optionally, reconstructed **vessels** carve an open perivascular CSF sleeve into the segmentation (see [Vessels](#vessels)), with the lumen either CSF or its own `VESSEL` (74) label.
-2. **Extracts a multi-boundary surface mesh** using PyVista's `contour_labels`.
+2. **Extracts a multi-boundary surface mesh** with surface nets (via [imagemesh](https://github.com/MariusCausemann/imagemesh)).
 3. **Tetrahedralises** the surface with fTetWild (`pytetwild`).
 4. **Marks** each tetrahedron with its anatomical label via the winding-number method.
 
@@ -168,14 +168,14 @@ All other parameters retain their defaults. Missing sections and missing keys wi
 | `--cerebrum-cerebellum-gap` | `tentorium.cerebrum_cerebellum_gap` | Gap between cerebrum and cerebellum |
 | `--brainstem-caudal-z-offset` | `extend_brainstem_caudally.footprint_z_offset` | Z-offset for brainstem extrusion footprint |
 | `--ventricle-jacket-thickness` | `tight_ventricles.surrounding_layer_thickness` | Tissue jacket around ventricles |
-| `--decimation-ratio` | `coarsen_surface.decimation_ratio` | Triangle reduction ratio for decimated output |
+| `--simplify-epsilon` | `coarsen_surface.epsilon` | Distance tolerance (voxels) of the simplified `_dec` surface output |
 
 ### Python API
 
 ```python
 from brainmesh.pipeline import segmentation_to_surface, surface_to_mesh
 from brainmesh.config import SegmentationConfig
-from brainmesh.curved_mesh import convert_to_quadratic, adaptive_snap_boundaries
+from imagemesh.curved import convert_to_quadratic, adaptive_snap_boundaries
 
 # Use built-in defaults
 surf = segmentation_to_surface("testdata/sub1.nii.gz",
@@ -207,15 +207,16 @@ quad_mesh.save("results/mesh_curved.vtk")
 ```
 src/brainmesh/
   labels.py       — FreeSurfer/SynthSeg label definitions (Label namedtuple)
-  io.py           — nibabel ↔ PyVista conversion, upsampling
   config.py       — SegmentationConfig dataclasses + TOML loader
   segmentation.py — voxel-label cleanup (CSF enforcement, smoothing, ...)
   anatomy.py      — anatomically-specific ops (falx, tentorium, brainstem, ...)
-  surface.py      — surface extraction, decimation, label transfer
-  mesh.py         — tetrahedral meshing and winding-number marking
-  curved_mesh.py  — quadratic conversion and boundary snapping
+  mesh.py         — CSF extraction, SAS / spinal facet marking
   pipeline.py     — high-level end-to-end functions
   cli.py          — argparse entry points
+
+The generic meshing core (surface nets, simplification, fTetWild meshing and
+labelling, facet tagging, curved meshes, I/O) lives in the shared `imagemesh`
+package.
 
 configs/
   default.toml    — annotated reference config (copy & edit per subject)

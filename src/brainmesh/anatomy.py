@@ -7,12 +7,10 @@ from nbmorph import erode_labels_spherical as erode
 
 from .labels import Label, VENTRICLE_LABELS, TISSUE_LABELS
 from .decorators import track_voxel_changes, plot_voxel_changes, time_func
+from imagemesh.morphology import enforce_min_thickness, get_lowest_point, separate_labels
 from .segmentation import (
     enforce_csf_around_falx,
     enforce_csf_around_tentorium,
-    enforce_min_thickness,
-    separate_labels,
-    get_lowest_point,
 )
 import cc3d
 
@@ -31,6 +29,7 @@ def separate_hemispheres(data, distance=4):
         [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER],
         [Label.LEFT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_WHITE_MATTER],
         distance,
+        Label.CSF,
         except_region=cc_exclusion_mask,
     )
 
@@ -42,6 +41,7 @@ def separate_cerebellum_and_cerebrum(data, distance=4):
         [Label.RIGHT_CEREBRAL_CORTEX, Label.LEFT_CEREBRAL_CORTEX],
         [Label.RIGHT_CEREBELLUM_CORTEX, Label.LEFT_CEREBELLUM_CORTEX],
         distance,
+        Label.CSF,
         except_labels=[np.uint8(70)],
     )
 
@@ -213,7 +213,7 @@ def create_falx(
     depth_limit_taper_end_angle=-30.0,
     surrounding_csf_radius=1,
 ):
-    from .gaussian import gaussian
+    from imagemesh.gaussian import gaussian
 
     data = separate_hemispheres(data, distance=hemisphere_gap)
     right_mask = np.isin(data, [Label.RIGHT_CEREBRAL_CORTEX, Label.RIGHT_CEREBRAL_WHITE_MATTER])
@@ -296,7 +296,7 @@ def create_tentorium(
     mask_thickening_radius=1,
     surrounding_csf_radius=1,
 ):
-    from .gaussian import gaussian
+    from imagemesh.gaussian import gaussian
 
     data = separate_cerebellum_and_cerebrum(data, distance=cerebrum_cerebellum_gap)
     cer_mask = np.isin(data, [
@@ -356,7 +356,7 @@ def build_inferior_lateral_ventricle_horns(
     smoothing_radius=2,
     debug=False
 ):
-    from .segmentation import fill_from_neighbors
+    from imagemesh.morphology import fill_from_neighbors
     LV_INF = [Label.LEFT_INFERIOR_LATERAL_VENTRICLE, Label.RIGHT_INFERIOR_LATERAL_VENTRICLE]
     LV = [Label.LEFT_LATERAL_VENTRICLE, Label.RIGHT_LATERAL_VENTRICLE]
     CP = [Label.LEFT_CHOROID_PLEXUS, Label.RIGHT_CHOROID_PLEXUS]
@@ -499,7 +499,7 @@ def _connect_by_line(m1, m2, radius=2, maxdist=np.inf):
 def solidify_label(data, ID, closing_radius=0, smoothing_radius=0,
                 max_island_size=None, max_connection_dist=10,
                 connect=True, neighbor_labels=TISSUE_LABELS):
-    from .segmentation import fill_from_neighbors
+    from imagemesh.morphology import fill_from_neighbors
     old_mask = (data == ID)
     if max_island_size is None:
         max_island_size=int(old_mask.sum() * 0.05)

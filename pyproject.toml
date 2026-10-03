@@ -16,7 +16,7 @@ dependencies = [
     "pyvista",
     "nbmorph",
     "pytetwild",
-    "libigl",
+    "imagemesh",
     "edt",
     "fastremap",
     "scikit-image",

@@ -12,6 +12,6 @@ dependencies:
     - pyvista
     - nbmorph
     - pytetwild
-    - libigl
+    - -e ../imagemesh
     - edt
     - fastremap

@@ -3,11 +3,9 @@ import nibabel as nib
 import numpy as np
 import pytest
 
-from brainmesh.mesh import (
-    extract_csf,
-    mark_boundary_facets,
-    mark_interface_facets,
-)
+from imagemesh.facets import mark_boundary_facets
+
+from brainmesh.mesh import extract_csf, mark_interface_facets
 from brainmesh.phantom import make_phantom_seg
 from brainmesh.pipeline import segmentation_to_surface, surface_to_mesh
 

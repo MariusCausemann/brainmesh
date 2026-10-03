@@ -24,8 +24,8 @@ def surface_main(argv=None):
                         help="Override extend_brainstem_caudally.footprint_z_offset.")
     parser.add_argument("--ventricle-jacket-thickness", type=int, default=None,
                         help="Override tight_ventricles.surrounding_layer_thickness.")
-    parser.add_argument("--decimation-ratio", type=float, default=None,
-                        help="Override coarsen_surface.decimation_ratio.")
+    parser.add_argument("--simplify-epsilon", type=float, default=None,
+                        help="Override coarsen_surface.epsilon (in voxels).")
 
     parser.add_argument("--vessel-centerlines", default=None,
                         help="Vessel centerlines (.vtp polylines with point-data 'radius' in mm, "
@@ -51,8 +51,8 @@ def surface_main(argv=None):
         cfg.extend_brainstem_caudally.footprint_z_offset = args.brainstem_caudal_z_offset
     if args.ventricle_jacket_thickness is not None:
         cfg.tight_ventricles.surrounding_layer_thickness = args.ventricle_jacket_thickness
-    if args.decimation_ratio is not None:
-        cfg.coarsen_surface.decimation_ratio = args.decimation_ratio
+    if args.simplify_epsilon is not None:
+        cfg.coarsen_surface.epsilon = args.simplify_epsilon
 
     segmentation_to_surface(
         args.seg,
@@ -145,13 +145,15 @@ def curve_mesh_main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    from brainmesh.curved_mesh import (
+    from imagemesh.curved import (
         adaptive_snap_boundaries,
         convert_to_quadratic,
         print_quality_stats,
         straighten_inverted_cells,
     )
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
+
+    from brainmesh.labels import SAS_LABEL_OFFSET
 
     input_mesh = read_mesh(args.input)
     target_surface = read_mesh(args.target)
@@ -171,6 +173,7 @@ def curve_mesh_main(argv=None):
         floor_factor=args.floor_factor,
         abs_floor=args.abs_floor,
         n_steps=args.steps,
+        ignore_above=SAS_LABEL_OFFSET,
     )
     final_q = print_quality_stats(quad_mesh, "3. Snapped Quadratic Mesh")
 
@@ -203,7 +206,7 @@ def mark_facets_main(argv=None):
                         help="Keep interfaces between SAS subdivision regions (dropped by default)")
     args = parser.parse_args(argv)
 
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
     from brainmesh.mesh import mark_facets
 
     mesh = read_mesh(args.mesh)
@@ -231,7 +234,7 @@ def remark_sas_main(argv=None):
     args = parser.parse_args(argv)
 
     import numpy as np
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
     from brainmesh.labels import Label
     from brainmesh.mesh import remark_csf_with_sas
 
@@ -263,7 +266,7 @@ def extract_csf_main(argv=None):
     args = parser.parse_args(argv)
 
     import numpy as np
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
     from brainmesh.labels import SPINAL_ID
     from brainmesh.mesh import extract_csf
 
@@ -300,7 +303,7 @@ def group_regions_main(argv=None):
                         help="Disable majority-vote smoothing of SAS boundary labels")
     args = parser.parse_args(argv)
 
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
     from brainmesh.mesh import group_csf_facets_by_region
     import numpy as np
     import tomlkit
@@ -330,7 +333,7 @@ def plot_mesh_main(argv=None):
 
     import pyvista as pv
     from pyvista import CellType
-    from brainmesh.io import read_mesh
+    from imagemesh.io import read_mesh
     from brainmesh.plotting import plot_surface_mesh, plot_tet_mesh
 
     mesh = read_mesh(args.mesh)
@@ -369,7 +372,7 @@ def plot_facets_main(argv=None):
     args = parser.parse_args(argv)
 
     import tomlkit
-    from brainmesh.io import read_mesh
+    from imagemesh.io import read_mesh
     from brainmesh.plotting import plot_facet_mesh
 
     labels_path = args.labels or args.facets.with_name(
@@ -423,8 +426,8 @@ def unlock_tets(argv=None):
 
     args = parser.parse_args(argv)
 
-    from .unlock_refine import subdivide_grid
-    from brainmesh.io import read_mesh, save_mesh
+    from imagemesh.io import read_mesh, save_mesh
+    from imagemesh.refine import subdivide_grid
 
     grid = read_mesh(args.input)
 

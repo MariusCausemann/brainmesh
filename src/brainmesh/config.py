@@ -111,8 +111,14 @@ class EnforceCSFAroundCfg:
 
 
 @dataclass
+class SurfaceCfg:
+    smoothing_scale: float = 1.0
+    iterations: int = 16
+
+
+@dataclass
 class CoarsenSurfaceCfg:
-    decimation_ratio: float = 0.9
+    epsilon: float = 0.5
 
 
 @dataclass
@@ -154,6 +160,7 @@ class SegmentationConfig:
     csf_around_tentorium: EnforceCSFAroundCfg = field(default_factory=EnforceCSFAroundCfg)
     csf_around_falx: EnforceCSFAroundCfg = field(default_factory=EnforceCSFAroundCfg)
     extend_brainstem_caudally: ExtendBrainstemCaudallyCfg = field(default_factory=ExtendBrainstemCaudallyCfg)
+    surface: SurfaceCfg = field(default_factory=SurfaceCfg)
     coarsen_surface: CoarsenSurfaceCfg = field(default_factory=CoarsenSurfaceCfg)
     vessels: VesselCfg = field(default_factory=VesselCfg)
     misc: PipelineMiscCfg = field(default_factory=PipelineMiscCfg)

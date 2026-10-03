@@ -171,7 +171,7 @@ def mask_distance(mask_img, seg_img, labels=()):
     from nibabel.processing import resample_from_to
     from scipy.ndimage import distance_transform_edt
 
-    from .io import get_img
+    from imagemesh.image import get_img
 
     mask_img = get_img(mask_img)
     raw = np.asarray(mask_img.dataobj)
@@ -277,7 +277,7 @@ def enforce_vessel_sleeve(
     from cc3d import dust
     from nbmorph import dilate_labels_spherical as dilate
 
-    from .segmentation import set_mask_scalar
+    from imagemesh.morphology import set_mask_scalar
 
     if voxel_size is not None and sleeve_thickness < min(voxel_size):
         warnings.warn(

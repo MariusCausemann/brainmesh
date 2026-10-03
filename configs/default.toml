@@ -218,7 +218,13 @@ mask_labels      = []
 
 # --- Surface output ----------------------------------------------------------
 
+[surface]
+# Surface nets smoothing: maximal displacement of a surface point (in voxels)
+# and number of smoothing iterations.
+smoothing_scale = 1.0
+iterations = 16
+
 [coarsen_surface]
-# Fraction of triangles removed from the decimated surface output. 0.9
-# means 90% of triangles are removed (target-reduction style).
-decimation_ratio = 0.9
+# Distance tolerance (in voxels) of the simplified surface output (_dec):
+# the simplified surface deviates at most this far from the full surface.
+epsilon = 0.5

@@ -12,7 +12,7 @@ import pyvista as pv
 def test_sphere_surface_and_mesh():
     import nbmorph
     import pytetwild
-    from brainmesh import mark_mesh
+    from imagemesh.tetmesh import mark_mesh
 
     N, r = 20, 2
     data = np.ones((N, N, N), dtype=np.uint8)
@@ -48,6 +48,6 @@ def test_sphere_surface_and_mesh():
     )
     assert mesh.n_cells > 0
 
-    marked = mark_mesh(mesh, surf)
+    marked = mark_mesh(mesh, surf, label_name="marker")
     assert "marker" in marked.cell_data
     assert marked.n_cells > 0
